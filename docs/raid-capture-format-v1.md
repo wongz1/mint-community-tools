@@ -2,7 +2,7 @@
 
 The contract between the in-game addon (producer) and the website (consumer) for a recorded raid: boss kills, who was present at each, and the loot. The companion to [`export-string-format-v1.md`](export-string-format-v1.md), which covers a single character.
 
-Produced by the addon in this repository; consumed by the website's `web/src/lib/raid-capture.ts` (validation) and `web/src/lib/raid-ingest.ts` (writing and merging) in [wongz1/mintys-community-manager](https://github.com/wongz1/mintys-community-manager). The website keeps reference recordings in `web/src/lib/__fixtures__/` that its importer tests run against; an addon that produces strings matching those is one the website can import. A change to this format is made in both repositories.
+Produced by the addon in this repository; consumed by the website's `web/src/lib/raid-capture.ts` (validation) and `web/src/lib/raid-ingest.ts` (writing and merging). `web/src/lib/__fixtures__/` holds reference recordings (produced by the previous addon's test harness) that the importer tests run against. A change to this format is made in both repositories.
 
 ## Envelope
 
@@ -28,7 +28,7 @@ Keys are emitted in sorted order. An unknown value is **omitted**, never `null`.
 
 ### `players[]`
 
-`name`, `realm` (the recorder's realm when the client gave a bare name; the realm suffix from a cross-realm `Name-Realm` otherwise), `classFile` (stable token, e.g. `PRIEST`), `class` (localized). `classFile`/`class` are absent for a player seen only in a loot message and never in the raid roster.
+`name` (the FIRST name), `lastName` (WoW Forever's last name — the second return of `UnitName`, or `GetRaidRosterInfo`'s name split at its space; see the character spec), `realm` (the recorder's realm when the client gave a bare name; the realm suffix from a cross-realm `Name-Realm` otherwise), `classFile` (stable token, e.g. `PRIEST`), `class` (localized). `classFile`/`class` are absent for a player seen only in a loot message and never in the raid roster. Loot messages name players as `First Last`; the addon splits at the space. A consumer that receives a `name` containing a space (an older addon) treats the part after the last space as the last name.
 
 ### `kills[]`
 

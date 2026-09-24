@@ -73,9 +73,11 @@ Keys are emitted in sorted order. A key whose value is unknown is **omitted**, n
 
 ### `char`
 
-`name`, `realm` (display name), `realmSlug` (normalised, when the client provides it), `region` (`US`/`KR`/`EU`/`TW`/`CN`), `class` (localised), `classFile` (stable English token like `WARRIOR`, use this for logic), `race`, `raceFile`, `sex` (2 = male, 3 = female), `level`, `faction`, `guild`, `guildRank`.
+`name` (the FIRST name), `lastName` (the last name — see below), `realm` (display name), `realmSlug` (normalised, when the client provides it), `region` (`US`/`KR`/`EU`/`TW`/`CN`), `class` (localised), `classFile` (stable English token like `WARRIOR`, use this for logic), `race`, `raceFile`, `sex` (2 = male, 3 = female), `level`, `faction`, `guild`, `guildRank`.
 
-**Character identity is `region` + `realm` + `name`.** Names are only unique per realm.
+**WoW Forever characters have a first and a last name**, and it is the pair that is unique — first names repeat. In the real client `UnitName("player")` returns the first name, with the last name as its **second return value** (where other clients put the realm); the settings folder writes them as `First-Last` and chat lines as `First Last`. The addon puts the first name in `name` and the last name in `lastName` (a single word, no spaces or hyphens). A second value that equals the current realm name is the realm, not a last name (`GetNormalizedRealmName()` to compare). `lastName` is omitted only on a client that has no last names at all.
+
+**Character identity is `region` + `realm` + `name` + `lastName`.** A website row that has no last name yet (from before the addon sent one) is matched by first name and completed by the next export that names the character.
 
 ### `items[]`
 
