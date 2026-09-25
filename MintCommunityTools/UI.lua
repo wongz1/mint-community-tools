@@ -1,5 +1,5 @@
 --[[
-    UI.lua - the Mint Bridge window.
+    UI.lua - the Mint Community Tools window.
 
     Opened with /mint or the minimap button. It shows your character and every equipment
     slot as the addon sees it (hover a row for the item's tooltip), a summary line, and the
@@ -234,7 +234,7 @@ end
 ---------------------------------------------------------------------------
 
 local function build()
-    local f = safeCreate("Frame", "MintBridgeFrame", UIParent, BackdropTemplateMixin and "BackdropTemplate" or nil)
+    local f = safeCreate("Frame", "MintCommunityToolsFrame", UIParent, BackdropTemplateMixin and "BackdropTemplate" or nil)
     ui.frame = f
     f:SetSize(WIDTH, HEIGHT)
     f:SetPoint("CENTER")
@@ -253,11 +253,11 @@ local function build()
             insets = { left = 11, right = 12, top = 12, bottom = 11 },
         })
     end
-    if UISpecialFrames then table.insert(UISpecialFrames, "MintBridgeFrame") end   -- Escape closes it
+    if UISpecialFrames then table.insert(UISpecialFrames, "MintCommunityToolsFrame") end   -- Escape closes it
 
     local title = fontString(f, "GameFontNormalLarge")
     title:SetPoint("TOP", 0, -14)
-    title:SetText("Mint Bridge  |cff888888v" .. ns.VERSION .. "|r")
+    title:SetText("Mint Community Tools  |cff888888v" .. ns.VERSION .. "|r")
     local close = safeCreate("Button", nil, f, "UIPanelCloseButton")
     close:SetPoint("TOPRIGHT", -6, -6)
 
@@ -315,12 +315,12 @@ local function build()
 
     -- Actions
     local buttonsY = listBottom - 38
-    ui.rescan = button(f, "MintBridgeRescanButton", "Rescan", 90, function()
+    ui.rescan = button(f, "MintCommunityToolsRescanButton", "Rescan", 90, function()
         UI.Refresh()
         setStatus("Rescanned your gear.")
     end)
     ui.rescan:SetPoint("TOPLEFT", 24, buttonsY)
-    ui.export = button(f, "MintBridgeExportButton", "Export for website", 170, function() UI.Export(false) end)
+    ui.export = button(f, "MintCommunityToolsExportButton", "Export for website", 170, function() UI.Export(false) end)
     ui.export:SetPoint("LEFT", ui.rescan, "RIGHT", 8, 0)
 
     ui.hint = fontString(f, "GameFontHighlightSmall", WIDTH - 52)
@@ -329,10 +329,10 @@ local function build()
         .. "|cffffffffRoster|r page under |cffffffffAdd or update a character|r. Do this again whenever your gear changes.")
 
     -- The copy box: read-only, always fully selected
-    local scroll = safeCreate("ScrollFrame", "MintBridgeScroll", f, "UIPanelScrollFrameTemplate")
+    local scroll = safeCreate("ScrollFrame", "MintCommunityToolsScroll", f, "UIPanelScrollFrameTemplate")
     scroll:SetPoint("TOPLEFT", 26, buttonsY - 64)
     scroll:SetPoint("BOTTOMRIGHT", -46, 44)
-    local box = CreateFrame("EditBox", "MintBridgeEditBox", scroll)
+    local box = CreateFrame("EditBox", "MintCommunityToolsEditBox", scroll)
     ui.editBox = box
     box:SetMultiLine(true)
     box:SetAutoFocus(false)
@@ -350,7 +350,7 @@ local function build()
     box:SetScript("OnEditFocusGained", function(self) self:HighlightText() end)
     scroll:SetScrollChild(box)
 
-    ui.selectAll = button(f, "MintBridgeSelectAllButton", "Select all", 100, function()
+    ui.selectAll = button(f, "MintCommunityToolsSelectAllButton", "Select all", 100, function()
         if ui.currentText then selectAll(ui.editBox) else setStatus("Nothing to select yet. Click Export for website first.", true) end
     end)
     ui.selectAll:SetPoint("BOTTOMLEFT", 24, 14)
@@ -385,7 +385,7 @@ end
 -- the rim. Hand-rolled rather than LibDBIcon so the addon has no library dependencies.
 function UI.CreateMinimapButton()
     if not Minimap or ui.minimap then return end
-    local b = CreateFrame("Button", "MintBridgeMinimapButton", Minimap)
+    local b = CreateFrame("Button", "MintCommunityToolsMinimapButton", Minimap)
     ui.minimap = b
     b:SetSize(31, 31)
     b:SetFrameStrata("MEDIUM")
@@ -404,7 +404,7 @@ function UI.CreateMinimapButton()
     b:SetHighlightTexture("Interface\\Minimap\\UI-Minimap-ZoomButton-Highlight")
 
     local function place()
-        local angle = math.rad((MintBridgeDB and MintBridgeDB.minimapAngle) or 200)
+        local angle = math.rad((MintCommunityToolsDB and MintCommunityToolsDB.minimapAngle) or 200)
         b:ClearAllPoints()
         b:SetPoint("CENTER", Minimap, "CENTER", math.cos(angle) * 80, math.sin(angle) * 80)
     end
@@ -416,8 +416,8 @@ function UI.CreateMinimapButton()
             local mx, my = Minimap:GetCenter()
             local cx, cy = GetCursorPosition()
             local scale = Minimap:GetEffectiveScale()
-            MintBridgeDB = MintBridgeDB or {}
-            MintBridgeDB.minimapAngle = math.deg(math.atan2(cy / scale - my, cx / scale - mx))
+            MintCommunityToolsDB = MintCommunityToolsDB or {}
+            MintCommunityToolsDB.minimapAngle = math.deg(math.atan2(cy / scale - my, cx / scale - mx))
             place()
         end)
     end)
@@ -425,7 +425,7 @@ function UI.CreateMinimapButton()
     b:SetScript("OnEnter", function(self)
         if not GameTooltip then return end
         GameTooltip:SetOwner(self, "ANCHOR_LEFT")
-        GameTooltip:AddLine("Mint Bridge")
+        GameTooltip:AddLine("Mint Community Tools")
         GameTooltip:AddLine("Click to scan your gear and export it for the website.", 1, 1, 1)
         GameTooltip:Show()
     end)

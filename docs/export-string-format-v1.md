@@ -113,7 +113,7 @@ The addon's source is public and strings are plain text, so a string can be hand
 
 ```json
 {
-  "addon": { "name": "MintBridge", "version": "0.1.0" },
+  "addon": { "name": "MintCommunityTools", "version": "0.1.0" },
   "char": { "class": "Warrior", "classFile": "WARRIOR", "faction": "Alliance", "guild": "My Guild",
             "lastName": "Stormwind", "level": 60, "name": "Theoden", "race": "Human", "realm": "Mock Realm", "region": "US" },
   "game": { "build": "60101", "toc": 16001, "version": "1.60.1" },

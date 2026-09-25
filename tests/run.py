@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Runs the Mint Bridge addon in a real Lua 5.1 interpreter against a mocked WoW API, drives the
+Runs the Mint Community Tools addon in a real Lua 5.1 interpreter against a mocked WoW API, drives the
 window (builds it, clicks Rescan and Export), then independently decodes the export string with
 Python (base64, zlib, json) and checks it against docs/export-string-format-v1.md.
 
@@ -31,7 +31,7 @@ import zlib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-ADDON_DIR = ROOT / "MintBridge"
+ADDON_DIR = ROOT / "MintCommunityTools"
 FILES = ["Encode.lua", "Collect.lua", "UI.lua", "Core.lua"]
 VARIANTS = ["forever", "classic", "mainline"]
 VERBOSE = "-v" in sys.argv
@@ -181,7 +181,7 @@ local function load(name, src)
   local fn, err = loadstring(src, "@" .. name)
   if not fn then error("SYNTAX " .. name .. ": " .. err) end
   setfenv(fn, env)
-  fn("MintBridge", ns)
+  fn("MintCommunityTools", ns)
 end
 '''
 
@@ -211,13 +211,13 @@ local function jsonEncode(v)
   error("jsonEncode: unsupported type " .. t)
 end
 
-local slash = env.SlashCmdList["MINTBRIDGE"]
+local slash = env.SlashCmdList["MINTCOMMUNITYTOOLS"]
 assert(slash, "slash command not registered")
-assert(env.SLASH_MINTBRIDGE1 == "/mint", "primary slash command")
+assert(env.SLASH_MINTCOMMUNITYTOOLS1 == "/mint", "primary slash command")
 
 fire("ADDON_LOADED", "SomeOtherAddon")
-fire("ADDON_LOADED", "MintBridge")
-assert(env.MintBridgeDB, "saved variables table created at ADDON_LOADED")
+fire("ADDON_LOADED", "MintCommunityTools")
+assert(env.MintCommunityToolsDB, "saved variables table created at ADDON_LOADED")
 
 slash("selftest")
 slash("debug")
@@ -226,7 +226,7 @@ slash("help")
 
 -- The window: /mint builds and opens it; the gear list is filled on show.
 slash("")
-local frame = frameNamed("MintBridgeFrame")
+local frame = frameNamed("MintCommunityToolsFrame")
 assert(frame._shown, "/mint opens the window")
 assert(ns.ui.rows and #ns.ui.rows == 19, "one row per equipment slot")
 assert(ns.ui.rows[1].item and ns.ui.rows[1].item.id == 12640, "row 1 shows the helm")
@@ -238,8 +238,8 @@ local summaryText = ns.ui.summary:GetText()
 fire("PLAYER_EQUIPMENT_CHANGED", 1, false)
 fire("UNIT_INVENTORY_CHANGED", "player")
 
-click("MintBridgeRescanButton")
-click("MintBridgeExportButton")
+click("MintCommunityToolsRescanButton")
+click("MintCommunityToolsExportButton")
 assert(ns.lastExport and ns.lastExport.str, "Export button produced a string")
 local exportText = ns.ui.editBox:GetText()
 assert(exportText == ns.lastExport.str, "the copy box holds the export string")
@@ -357,7 +357,7 @@ def run_variant(lua, variant, workdir):
 
     assert data["v"] == 1 and data["src"] == "self" and data["ts"] == 1790000000
     assert "kind" not in data, "a character export has no kind key"
-    assert data["addon"] == {"name": "MintBridge", "version": "0.1.0"}
+    assert data["addon"] == {"name": "MintCommunityTools", "version": "0.1.0"}
     assert data["game"] == {"version": "1.60.1", "build": "60101", "toc": 16001}
 
     c = data["char"]
@@ -411,13 +411,13 @@ def run_variant(lua, variant, workdir):
 
     prints = [strip_colors(p) for p in result["prints"]]
     assert any("0 failed" in p for p in prints), "in-addon selftest reported failures"
-    assert any(p.startswith("Mint Bridge: v0.1.0 loaded.") for p in prints), prints[:3]
+    assert any(p.startswith("Mint Community Tools: v0.1.0 loaded.") for p in prints), prints[:3]
     scan_line = next(p for p in prints if "items equipped" in p and "Type /mint" in p)
     expected_name = "Théoden Stormwind" if variant == "forever" else "Théoden"
-    assert scan_line.startswith(f"Mint Bridge: {expected_name}: 6 items equipped"), scan_line
+    assert scan_line.startswith(f"Mint Community Tools: {expected_name}: 6 items equipped"), scan_line
     assert not any("talents could not be read" in p for p in prints)
 
-    expected_globals = ["MintBridgeDB", "SLASH_MINTBRIDGE1", "SLASH_MINTBRIDGE2", "SLASH_MINTBRIDGE3"]
+    expected_globals = ["MintCommunityToolsDB", "SLASH_MINTCOMMUNITYTOOLS1", "SLASH_MINTCOMMUNITYTOOLS2", "SLASH_MINTCOMMUNITYTOOLS3"]
     assert result["newglobals"] == expected_globals, f"unexpected globals: {result['newglobals']}"
 
     if WRITE_FIXTURES:

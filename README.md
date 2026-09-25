@@ -2,7 +2,7 @@
 
 The World of Warcraft addon side of [Minty's Community Manager](https://github.com/wongz1/mintys-community-manager), a community website and Discord bot for a WoW Forever (Classic+) guild. This repository is public because an addon ships as readable Lua; the website and bot live in the other repository.
 
-The addon is called **Mint Bridge** in game (`/mint`).
+The addon is called **Mint Community Tools** in game (`/mint`).
 
 **Status:** v0.1.0. The gear scanner works: every member can scan their equipped gear and talents in a window and export them as a string for the website's Roster page. Raid recording and talent tree export are specified (below) but not built yet.
 
@@ -16,10 +16,10 @@ WoW addons have no network access, so everything moves by copy and paste, one wa
 
 ## Install
 
-1. Copy (or symlink) the `MintBridge` folder into your WoW Forever addons folder:
-   `World of Warcraft/_classic_beta_/Interface/AddOns/MintBridge`
-   so that `MintBridge.toc` ends up at `.../AddOns/MintBridge/MintBridge.toc`.
-2. Start the game (or `/reload` if it is already running). Mint Bridge prints a line in chat when it has loaded.
+1. Copy (or symlink) the `MintCommunityTools` folder into your WoW Forever addons folder:
+   `World of Warcraft/_classic_beta_/Interface/AddOns/MintCommunityTools`
+   so that `MintCommunityTools.toc` ends up at `.../AddOns/MintCommunityTools/MintCommunityTools.toc`.
+2. Start the game (or `/reload` if it is already running). Mint Community Tools prints a line in chat when it has loaded.
 3. If the AddOns screen at character select marks it "out of date", tick **Load out of date AddOns**.
 
 ## Use
@@ -41,11 +41,11 @@ Do it again whenever your gear changes. The window refreshes on its own when you
 | `/mint debug` | Client build, interface number and which APIs exist. Paste this in bug reports. |
 | `/mint selftest` | Run the built-in encoder tests. |
 
-`/mintbridge` and `/gb` do the same as `/mint`.
+`/mct` and `/gb` do the same as `/mint`.
 
 ### The WoW Forever beta client
 
-- **Saved settings do not load.** The beta client writes addon settings at logout but never reads them back (every addon is affected). Mint Bridge keeps only conveniences there — the minimap button's position and the last export — so nothing is lost; the minimap button just goes back to its default spot after a logout.
+- **Saved settings do not load.** The beta client writes addon settings at logout but never reads them back (every addon is affected). Mint Community Tools keeps only conveniences there — the minimap button's position and the last export — so nothing is lost; the minimap button just goes back to its default spot after a logout.
 - **Names.** WoW Forever characters have a first and a last name. The addon reads them from `UnitName` (first name, with the last name as the second value) and exports both; the website identifies a character by region, realm, first name and last name together.
 - **Interface number.** `16001` in the `.toc` is what other addons load with on the 1.60.1 beta client. `/mint debug` prints the number the client actually reports.
 
@@ -62,8 +62,8 @@ All are versioned. Adding optional fields is fine within a version; changing the
 ## Layout
 
 ```
-MintBridge/
-  MintBridge.toc   addon manifest (interface number, load order)
+MintCommunityTools/
+  MintCommunityTools.toc   addon manifest (interface number, load order)
   Encode.lua       JSON, base64, Adler-32, the GAE1 envelope; pure Lua 5.1, no bit ops
   Collect.lua      reads the character, equipped items and talents (every API feature-detected)
   UI.lua           the window: gear list, tooltips, export box, minimap button

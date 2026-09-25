@@ -1,7 +1,7 @@
 --[[
     Core.lua - slash commands and addon lifecycle.
 
-    /mint               open the Mint Bridge window (scan, gear list, export)
+    /mint               open the Mint Community Tools window (scan, gear list, export)
     /mint export        scan your gear and put the export string in the window, ready to copy
     /mint scan          print a one-line summary of your gear to chat
     /mint json          the export as raw JSON in the window (for debugging)
@@ -9,18 +9,18 @@
     /mint selftest      run the built-in encoder tests
     /mint help
 
-    /mintbridge and /gb do the same as /mint.
+    /mct and /gb do the same as /mint.
 
-    Saved settings (MintBridgeDB) hold only conveniences: the minimap button's position and the
+    Saved settings (MintCommunityToolsDB) hold only conveniences: the minimap button's position and the
     last export. The WoW Forever beta client writes saved variables but does not read them back
     (a known client bug), so nothing here depends on them surviving a logout.
 ]]
 
 local ADDON, ns = ...
-ns.NAME = "MintBridge"
+ns.NAME = "MintCommunityTools"
 ns.VERSION = "0.1.0"
 
-local PREFIX = "|cff7fe5a8Mint Bridge|r: "
+local PREFIX = "|cff7fe5a8Mint Community Tools|r: "
 
 local function say(msg)
     print(PREFIX .. tostring(msg))
@@ -63,8 +63,8 @@ function ns.Export(rawJson)
 
     ns.lastExport = { ts = data.ts, str = str, json = json, signature = ns.Signature(data) }
     -- Kept in SavedVariables so a future companion tool could pick it up from disk.
-    MintBridgeDB = MintBridgeDB or {}
-    MintBridgeDB.lastExport = { ts = data.ts, str = str }
+    MintCommunityToolsDB = MintCommunityToolsDB or {}
+    MintCommunityToolsDB.lastExport = { ts = data.ts, str = str }
 
     if data.talentsError then
         say("talents could not be read: " .. data.talentsError)
@@ -145,10 +145,10 @@ end
 -- Slash command and lifecycle
 ---------------------------------------------------------------------------
 
-SLASH_MINTBRIDGE1 = "/mint"
-SLASH_MINTBRIDGE2 = "/mintbridge"
-SLASH_MINTBRIDGE3 = "/gb"
-SlashCmdList["MINTBRIDGE"] = function(msg)
+SLASH_MINTCOMMUNITYTOOLS1 = "/mint"
+SLASH_MINTCOMMUNITYTOOLS2 = "/mct"
+SLASH_MINTCOMMUNITYTOOLS3 = "/gb"
+SlashCmdList["MINTCOMMUNITYTOOLS"] = function(msg)
     local cmd = (msg or ""):lower():match("^%s*(%S*)") or ""
     if cmd == "" then
         ns.UI.Toggle()
@@ -176,7 +176,7 @@ events:RegisterEvent("ADDON_LOADED")
 events:SetScript("OnEvent", function(self, event, ...)
     if event == "ADDON_LOADED" then
         if (...) ~= ADDON then return end
-        MintBridgeDB = MintBridgeDB or {}
+        MintCommunityToolsDB = MintCommunityToolsDB or {}
         self:UnregisterEvent("ADDON_LOADED")
         for _, name in ipairs(GEAR_EVENTS) do
             pcall(self.RegisterEvent, self, name)

@@ -74,7 +74,7 @@ As with every export: the addon's source is public and the string is plain text,
 
 ```json
 {
-  "addon": { "name": "MintBridge", "version": "0.1.0" },
+  "addon": { "name": "MintCommunityTools", "version": "0.1.0" },
   "class": { "class": "Warrior", "classFile": "WARRIOR" },
   "game": { "build": "60101", "toc": 16001, "version": "1.60.1" },
   "kind": "talents",

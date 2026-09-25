@@ -1,9 +1,9 @@
 ## Interface: 16001
-## Title: Mint Bridge
+## Title: Mint Community Tools
 ## Notes: The in-game side of Minty's Community Manager. Scans your equipped gear and talents and turns them into a string you paste on the guild website's Roster page.
 ## Author: Zack
 ## Version: 0.1.0
-## SavedVariables: MintBridgeDB
+## SavedVariables: MintCommunityToolsDB
 ## IconTexture: Interface\Icons\INV_Misc_Note_01
 ## X-License: MIT
 ## X-Website: https://github.com/wongz1/mint-community-tools
