@@ -32,6 +32,50 @@ Collect.SLOT_NAMES = {
 Collect.COSMETIC_SLOTS = { [4] = true, [19] = true }
 
 local REGIONS = { "US", "KR", "EU", "TW", "CN" }
+local REGION_SET = { US = true, KR = true, EU = true, TW = true, CN = true }
+Collect.REGION_SET = REGION_SET
+-- Used only when no source below answers at all.
+Collect.DEFAULT_REGION = "US"
+-- Portal values that name a test client rather than a region. Blizzard's beta and PTR
+-- realms are hosted in the US, so a beta client is a US client.
+local TEST_PORTALS = { beta = true, test = true, ptr = true }
+
+---------------------------------------------------------------------------
+-- Region
+---------------------------------------------------------------------------
+
+-- Which region this character is on. The website needs it (it is part of a character's
+-- identity), and the beta client does not answer GetCurrentRegion like other clients do, so
+-- several sources are tried in turn. Returns region, source; nil when nothing answered.
+local function detectRegion(override)
+    if type(override) == "string" and REGION_SET[override:upper()] then
+        return override:upper(), "set with /mint region"
+    end
+    if GetCurrentRegion then
+        local ok, r = pcall(GetCurrentRegion)
+        if ok and REGIONS[r] then return REGIONS[r], "GetCurrentRegion" end
+    end
+    if GetCurrentRegionName then
+        local ok, r = pcall(GetCurrentRegionName)
+        if ok and type(r) == "string" and REGION_SET[r:upper()] then return r:upper(), "GetCurrentRegionName" end
+    end
+    local portal = Collect.Portal()
+    if portal then
+        if REGION_SET[portal:upper()] then return portal:upper(), "portal cvar" end
+        if TEST_PORTALS[portal:lower()] then return "US", "beta client" end
+    end
+    return nil
+end
+Collect.DetectRegion = detectRegion
+
+-- The client's portal cvar ("us", "eu", "beta", ...), or nil. Exported as game.portal so the
+-- website can tell a beta export from a live one.
+function Collect.Portal()
+    if not GetCVar then return nil end
+    local ok, portal = pcall(GetCVar, "portal")
+    if ok and type(portal) == "string" and portal ~= "" then return portal end
+    return nil
+end
 
 ---------------------------------------------------------------------------
 -- Names
@@ -168,11 +212,11 @@ local function collectCharacter(unit)
         local ok, g, r = pcall(GetGuildInfo, unit)
         if ok then guildName, guildRank = g, r end
     end
-    local region
-    if GetCurrentRegion then
-        local ok, r = pcall(GetCurrentRegion)
-        if ok then region = REGIONS[r] end
+    local region, regionSource = detectRegion(ns.RegionOverride and ns.RegionOverride())
+    if not region then
+        region, regionSource = Collect.DEFAULT_REGION, "assumed"
     end
+    Collect.regionSource = regionSource   -- shown in the window; not part of the export
     local realmSlug
     if GetNormalizedRealmName then
         local ok, r = pcall(GetNormalizedRealmName)
@@ -277,7 +321,7 @@ function Collect.FromUnit(unit, source)
         src   = source or "self",
         ts    = time(),
         addon = { name = ns.NAME, version = ns.VERSION },
-        game  = { version = gameVersion, build = gameBuild, toc = toc },
+        game  = { version = gameVersion, build = gameBuild, toc = toc, portal = Collect.Portal() },
         char  = collectCharacter(unit),
         items = collectItems(unit),
     }
@@ -319,7 +363,7 @@ function Collect.Diagnostics()
     local names = {
         "GetInventoryItemLink", "GetInventoryItemQuality", "GetInventoryItemTexture",
         "GetItemInfo", "GetItemStats", "GetDetailedItemLevelInfo", "NotifyInspect",
-        "GetNumTalentTabs", "GetTalentTabInfo", "GetTalentInfo", "GetCurrentRegion",
+        "GetNumTalentTabs", "GetTalentTabInfo", "GetTalentInfo", "GetCurrentRegion", "GetCurrentRegionName", "GetCVar",
         "GetNormalizedRealmName", "GetRealmName", "GetGuildInfo", "UnitSex",
     }
     local lines = {}
@@ -333,5 +377,14 @@ function Collect.Diagnostics()
     local a, b = UnitName("player")
     lines[#lines + 1] = ("UnitName: [%s] [%s] -> first [%s] last [%s] realm [%s]"):format(
         tostring(a), tostring(b), tostring(first), tostring(last), tostring(realm))
+    local function try(fn, ...)
+        if not fn then return "absent" end
+        local ok, v = pcall(fn, ...)
+        return ok and tostring(v) or ("error: " .. tostring(v))
+    end
+    lines[#lines + 1] = ("region sources: GetCurrentRegion [%s], GetCurrentRegionName [%s], portal cvar [%s], realmList cvar [%s]"):format(
+        try(GetCurrentRegion), try(GetCurrentRegionName), try(GetCVar, "portal"), try(GetCVar, "realmList"))
+    local region, source = detectRegion(ns.RegionOverride and ns.RegionOverride())
+    lines[#lines + 1] = ("region used: %s (%s)"):format(region or Collect.DEFAULT_REGION, source or "assumed")
     return lines
 end

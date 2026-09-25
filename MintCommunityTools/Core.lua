@@ -4,6 +4,7 @@
     /mint               open the Mint Community Tools window (scan, gear list, export)
     /mint export        scan your gear and put the export string in the window, ready to copy
     /mint scan          print a one-line summary of your gear to chat
+    /mint region XX     set your region (US, EU, KR, TW, CN) if the client cannot tell the addon
     /mint json          the export as raw JSON in the window (for debugging)
     /mint debug         print client build info and which APIs exist (paste this in bug reports)
     /mint selftest      run the built-in encoder tests
@@ -26,6 +27,35 @@ local function say(msg)
     print(PREFIX .. tostring(msg))
 end
 ns.Say = say
+
+---------------------------------------------------------------------------
+-- Region override
+---------------------------------------------------------------------------
+
+-- The region set with /mint region. Kept in memory for the session and in saved variables
+-- for clients that load them.
+local regionOverride
+
+function ns.RegionOverride()
+    return regionOverride
+end
+
+local function doRegion(arg)
+    arg = (arg or ""):upper()
+    if arg == "" then
+        local region, source = ns.Collect.DetectRegion(regionOverride)
+        say(("region: %s (%s). To set it: /mint region US, EU, KR, TW or CN."):format(
+            region or ns.Collect.DEFAULT_REGION, source or "assumed, nothing answered"))
+    elseif ns.Collect.REGION_SET[arg] then
+        regionOverride = arg
+        MintCommunityToolsDB = MintCommunityToolsDB or {}
+        MintCommunityToolsDB.region = arg
+        say("region set to " .. arg .. ". Export again.")
+        ns.UI.OnGearChanged()
+    else
+        say("unknown region " .. arg .. ". Use US, EU, KR, TW or CN.")
+    end
+end
 
 ---------------------------------------------------------------------------
 -- Scanning and exporting (shared by the window and the slash commands)
@@ -158,12 +188,14 @@ SlashCmdList["MINTCOMMUNITYTOOLS"] = function(msg)
         ns.UI.Export(true)
     elseif cmd == "scan" then
         doScan()
+    elseif cmd == "region" then
+        doRegion((msg or ""):match("^%s*%S+%s+(%S+)"))
     elseif cmd == "debug" then
         doDebug()
     elseif cmd == "selftest" then
         doSelfTest()
     else
-        say("commands: /mint (open the window), /mint export, /mint scan, /mint json, /mint debug, /mint selftest")
+        say("commands: /mint (open the window), /mint export, /mint scan, /mint region, /mint json, /mint debug, /mint selftest")
     end
 end
 
@@ -177,6 +209,7 @@ events:SetScript("OnEvent", function(self, event, ...)
     if event == "ADDON_LOADED" then
         if (...) ~= ADDON then return end
         MintCommunityToolsDB = MintCommunityToolsDB or {}
+        if ns.Collect.REGION_SET[MintCommunityToolsDB.region or ""] then regionOverride = MintCommunityToolsDB.region end
         self:UnregisterEvent("ADDON_LOADED")
         for _, name in ipairs(GEAR_EVENTS) do
             pcall(self.RegisterEvent, self, name)

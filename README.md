@@ -37,6 +37,7 @@ Do it again whenever your gear changes. The window refreshes on its own when you
 | `/mint` | Open or close the window. |
 | `/mint export` | Scan and put the export string in the window, ready to copy. |
 | `/mint scan` | A one-line summary of your gear in chat. |
+| `/mint region EU` | Set your region (US, EU, KR, TW, CN) when the client cannot tell the addon. Without an argument, says which region is being used and why. |
 | `/mint json` | The export as raw JSON in the window, for debugging. |
 | `/mint debug` | Client build, interface number and which APIs exist. Paste this in bug reports. |
 | `/mint selftest` | Run the built-in encoder tests. |
@@ -47,6 +48,7 @@ Do it again whenever your gear changes. The window refreshes on its own when you
 
 - **Saved settings do not load.** The beta client writes addon settings at logout but never reads them back (every addon is affected). Mint Community Tools keeps only conveniences there — the minimap button's position and the last export — so nothing is lost; the minimap button just goes back to its default spot after a logout.
 - **Names.** WoW Forever characters have a first and a last name. The addon reads them from `UnitName` (first name, with the last name as the second value) and exports both; the website identifies a character by region, realm, first name and last name together.
+- **Region.** The website identifies a character by region, realm and name, but the beta client does not report its region the way other clients do. The addon tries `GetCurrentRegion`, `GetCurrentRegionName` and the `portal` cvar; a portal of `beta`, `test` or `ptr` means a Blizzard test client, which is US-hosted, so those export **US** (shown as "US, beta" in the window). Only when nothing answers at all does it assume US, and then it says so. The raw portal value is exported as `game.portal` so the website can tell a beta export from a live one. `/mint region EU` overrides it (kept for the session; also saved, for clients that load saved variables).
 - **Interface number.** `16001` in the `.toc` is what other addons load with on the 1.60.1 beta client. `/mint debug` prints the number the client actually reports.
 
 ## The contracts

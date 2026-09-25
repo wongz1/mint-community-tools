@@ -154,13 +154,20 @@ local env = {
   GetNumTalents = function(t) return 4 end,
   GetTalentInfo = function(t, i) return "T" .. i, "icon", 1, i, (t == 1 and i) or 0, 5 end,
 }
-if VARIANT == "classic" then
+if VARIANT == "forever" then
+  -- The beta client: no GetCurrentRegion, and the portal cvar names the beta rather than a
+  -- region. A beta client is a US client, and the portal is exported for the website to see.
+  env.GetCurrentRegion = nil
+  env.GetCVar = function(name) return name == "portal" and "beta" or nil end
+elseif VARIANT == "classic" then
   -- Classic Era: no last names, UnitName's second value is nil for your own character.
   env.UnitName = function() return "Th\195\169oden", nil end
 elseif VARIANT == "mainline" then
   -- Mainline-style client: UnitName's second value is the realm, no Classic talent API,
   -- C_Item namespace, detailed item level available, a German locale.
   env.UnitName = function() return "Th\195\169oden", "MockRealm" end
+  env.GetCurrentRegion = nil
+  env.GetCurrentRegionName = function() return "us" end
   env.GetNumTalentTabs = nil; env.GetTalentTabInfo = nil; env.GetNumTalents = nil; env.GetTalentInfo = nil
   local classicGetItemInfo = env.GetItemInfo
   env.GetItemInfo = nil
@@ -261,11 +268,20 @@ slash("export")
 assert(frame._shown, "/mint export opens the window")
 assert(ns.ui.editBox:GetText() == exportText, "/mint export puts the string back in the box")
 
+-- /mint region overrides whatever the client said (or failed to say), and survives a reload
+-- on clients that load saved variables.
+slash("region")
+slash("region eu")
+assert(env.MintCommunityToolsDB.region == "EU", "region kept in saved variables")
+slash("export")
+local regionExport = ns.ui.editBox:GetText()
+slash("region xx")
+
 local newg = {}
 for k in pairs(env) do if not before[k] then newg[#newg + 1] = k end end
 table.sort(newg)
 local RESULT = jsonEncode({ prints = out.prints, export = exportText, json = jsonText, newglobals = newg,
-  who = whoText, summary = summaryText, status = statusAfterExport })
+  who = whoText, summary = summaryText, status = statusAfterExport, regionExport = regionExport })
 io.write(RESULT)
 '''
 
@@ -358,7 +374,7 @@ def run_variant(lua, variant, workdir):
     assert data["v"] == 1 and data["src"] == "self" and data["ts"] == 1790000000
     assert "kind" not in data, "a character export has no kind key"
     assert data["addon"] == {"name": "MintCommunityTools", "version": "0.1.0"}
-    assert data["game"] == {"version": "1.60.1", "build": "60101", "toc": 16001}
+    assert {k: v for k, v in data["game"].items() if k != "portal"} == {"version": "1.60.1", "build": "60101", "toc": 16001}
 
     c = data["char"]
     assert c["name"] == "Théoden"  # UTF-8 survives the round trip
@@ -409,6 +425,19 @@ def run_variant(lua, variant, workdir):
     status = strip_colors(result["status"])
     assert status.startswith("Exported at 20:26: ") and "6 items. Press Ctrl+C now." in status, status
 
+    # Region: US by every route, and "assumed" is said out loud only when nothing answered.
+    assert c["region"] == "US"
+    who = strip_colors(result["who"])
+    if variant == "forever":
+        assert "Mock Realm (US, beta)" in who, who                # portal "beta" -> a US test client
+        assert data["game"]["portal"] == "beta"
+        assert "assumed" not in strip_colors(result["status"])
+    else:
+        assert "Mock Realm (US)" in who, who
+        assert "portal" not in data["game"]
+    overridden, _ = decode(result["regionExport"])
+    assert overridden["char"]["region"] == "EU", "/mint region eu changes the export"
+
     prints = [strip_colors(p) for p in result["prints"]]
     assert any("0 failed" in p for p in prints), "in-addon selftest reported failures"
     assert any(p.startswith("Mint Community Tools: v0.1.0 loaded.") for p in prints), prints[:3]
@@ -416,6 +445,9 @@ def run_variant(lua, variant, workdir):
     expected_name = "Théoden Stormwind" if variant == "forever" else "Théoden"
     assert scan_line.startswith(f"Mint Community Tools: {expected_name}: 6 items equipped"), scan_line
     assert not any("talents could not be read" in p for p in prints)
+    expected_source = {"forever": "beta client", "classic": "GetCurrentRegion", "mainline": "GetCurrentRegionName"}[variant]
+    assert any(p.startswith(f"Mint Community Tools: region: US ({expected_source}") for p in prints), [p for p in prints if "region" in p]
+    assert any("region set to EU" in p for p in prints) and any("unknown region XX" in p for p in prints)
 
     expected_globals = ["MintCommunityToolsDB", "SLASH_MINTCOMMUNITYTOOLS1", "SLASH_MINTCOMMUNITYTOOLS2", "SLASH_MINTCOMMUNITYTOOLS3"]
     assert result["newglobals"] == expected_globals, f"unexpected globals: {result['newglobals']}"

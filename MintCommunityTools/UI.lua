@@ -96,7 +96,12 @@ local function characterLine(c)
     if c.race then desc[#desc + 1] = c.race end
     if c.class then desc[#desc + 1] = c.class end
     if #desc > 0 then parts[#parts + 1] = table.concat(desc, " ") end
-    if c.realm then parts[#parts + 1] = c.realm .. (c.region and (" (" .. c.region .. ")") or "") end
+    if c.realm then
+        local region = c.region or "?"
+        if ns.Collect.regionSource == "assumed" then region = region .. ", assumed"
+        elseif ns.Collect.regionSource == "beta client" then region = region .. ", beta" end
+        parts[#parts + 1] = c.realm .. " (" .. region .. ")"
+    end
     return table.concat(parts, "  |cff666666-|r  ")
 end
 
@@ -184,6 +189,10 @@ local function render(data, reason)
     end
     ui.summary:SetText(summaryText(data))
 
+    if ns.Collect.regionSource == "assumed" then
+        setStatus(("The client did not say which region you are on, so %s was assumed. If that is wrong, type /mint region EU (or US, KR, TW, CN)."):format(
+            data.char.region or ns.Collect.DEFAULT_REGION), true)
+    end
     if ui.exportedAt and ns.lastExport and ns.lastExport.signature ~= ns.Signature(data) then
         setStatus("Your gear changed since the last export. Export again before pasting.", true)
     end

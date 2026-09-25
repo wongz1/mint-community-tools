@@ -65,7 +65,7 @@ Keys are emitted in sorted order. A key whose value is unknown is **omitted**, n
 | `src` | string | `"self"` (player exported their own character). Reserved for `"inspect"` in a later version. |
 | `ts` | number | Unix time (seconds) when the export was made. |
 | `addon` | object | `name`, `version` of the exporting addon. |
-| `game` | object | `version` (e.g. `"1.15.9"`), `build`, `toc` (interface number) reported by the client. |
+| `game` | object | `version` (e.g. `"1.15.9"`), `build`, `toc` (interface number) reported by the client. Optional `portal`: the client's `portal` cvar as given (`"us"`, `"eu"`, `"beta"`, ...), so a consumer can tell an export from a beta or PTR client. |
 | `char` | object | See below. |
 | `items` | array | Equipped items. Empty slots are simply absent. |
 | `talents` | array | Optional. Classic-style talent trees. Absent when the client has no such API. |
