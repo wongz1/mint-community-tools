@@ -60,6 +60,7 @@ Do it again whenever your gear changes. The window refreshes on its own when you
 | [`docs/export-string-format-v1.md`](docs/export-string-format-v1.md) | The `GAE1:` character export string: layout, checksum, the JSON document with the character, equipped items (with the client's stat block for each) and talents. |
 | [`docs/raid-capture-format-v1.md`](docs/raid-capture-format-v1.md) | The raid recording: the session envelope, kills, attendees, loot, and the fingerprint the website uses to merge two officers' recordings of one raid. |
 | [`docs/talent-tree-format-v1.md`](docs/talent-tree-format-v1.md) | A class's talent trees as the game shows them — every tree, each talent's place, ranks, prerequisite and text — which the website's talent calculator is built on. The talent ORDER is the contract: the character export's rank digits follow it. |
+| [`docs/class-data-format-v1.md`](docs/class-data-format-v1.md) | A class's spellbook (read at a trainer: every rank, the level it is learned at, cost, text) and a character's racials, exported per character and merged by the website — so the site's class reference comes from the game itself rather than a third party's datamining. |
 
 All are versioned. Adding optional fields is fine within a version; changing the meaning of a field or the string layout means a new prefix, and the website's decoders are updated alongside. Keep the copies in both repositories the same.
 
