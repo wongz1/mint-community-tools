@@ -2,34 +2,92 @@
 
 The World of Warcraft addon side of [Minty's Community Manager](https://github.com/wongz1/mintys-community-manager), a community website and Discord bot for a WoW Forever (Classic+) guild. This repository is public because an addon ships as readable Lua; the website and bot live in the other repository.
 
-**Status:** starting from scratch. Nothing here runs yet. What exists is the contract the addon has to meet — the two string formats the website already imports — so the addon can be built against something fixed.
+The addon is called **Mint Bridge** in game (`/mint`).
+
+**Status:** v0.1.0. The gear scanner works: every member can scan their equipped gear and talents in a window and export them as a string for the website's Roster page. Raid recording and talent tree export are specified (below) but not built yet.
 
 ## What the addon does
 
 WoW addons have no network access, so everything moves by copy and paste, one way, from the game to the website:
 
-- **Every member** exports their character (gear and talents) as a string and pastes it on the website's Roster page. That is how the roster and armory are filled.
-- **Anyone** can export their class's talent trees, so the website's talent calculator shows WoW Forever's real trees rather than Classic Era's placeholders. Any level, any build; rank text the tooltip can't show is left out and filled in from other players' exports.
-- **Officers** record a raid night — boss kills, who was there for each kill, what dropped and who received it — and paste the recording on the website's Raids page. If several officers recorded the same raid, the website merges their recordings, each filling in what the others missed.
+- **Every member** exports their character (gear and talents) as a string and pastes it on the website's Roster page. That is how the roster and armory are filled. *(Built.)*
+- **Anyone** can export their class's talent trees, so the website's talent calculator shows WoW Forever's real trees rather than Classic Era's placeholders. *(Not yet.)*
+- **Officers** record a raid night — boss kills, who was there for each kill, what dropped and who received it — and paste the recording on the website's Raids page. *(Not yet.)*
 
-The website imports both today; the addon's job is to produce them.
+## Install
+
+1. Copy (or symlink) the `MintBridge` folder into your WoW Forever addons folder:
+   `World of Warcraft/_classic_beta_/Interface/AddOns/MintBridge`
+   so that `MintBridge.toc` ends up at `.../AddOns/MintBridge/MintBridge.toc`.
+2. Start the game (or `/reload` if it is already running). Mint Bridge prints a line in chat when it has loaded.
+3. If the AddOns screen at character select marks it "out of date", tick **Load out of date AddOns**.
+
+## Use
+
+Type `/mint` or click the note icon on the minimap. The window shows your character, all nineteen equipment slots as the addon sees them (hover a row for the item's tooltip), the average item level, and your talent split.
+
+1. Click **Export for website**. The export string appears in the box at the bottom, already selected.
+2. Press **Ctrl+C** (**Cmd+C** on a Mac) to copy it.
+3. On the website, open **Roster** and paste it under **Add or update a character**.
+
+Do it again whenever your gear changes. The window refreshes on its own when you swap an item while it is open, and tells you if your gear changed since the last export.
+
+| Command | What it does |
+|---------|--------------|
+| `/mint` | Open or close the window. |
+| `/mint export` | Scan and put the export string in the window, ready to copy. |
+| `/mint scan` | A one-line summary of your gear in chat. |
+| `/mint json` | The export as raw JSON in the window, for debugging. |
+| `/mint debug` | Client build, interface number and which APIs exist. Paste this in bug reports. |
+| `/mint selftest` | Run the built-in encoder tests. |
+
+`/mintbridge` and `/gb` do the same as `/mint`.
+
+### The WoW Forever beta client
+
+- **Saved settings do not load.** The beta client writes addon settings at logout but never reads them back (every addon is affected). Mint Bridge keeps only conveniences there — the minimap button's position and the last export — so nothing is lost; the minimap button just goes back to its default spot after a logout.
+- **Names.** WoW Forever characters have a first and a last name. The addon reads them from `UnitName` (first name, with the last name as the second value) and exports both; the website identifies a character by region, realm, first name and last name together.
+- **Interface number.** `16001` in the `.toc` is what other addons load with on the 1.60.1 beta client. `/mint debug` prints the number the client actually reports.
 
 ## The contracts
 
 | Spec | What it describes |
 |------|-------------------|
-| [`docs/export-string-format-v1.md`](docs/export-string-format-v1.md) | The `GAE1:` character export string: layout, checksum, the JSON document with the character, equipped items and talents. |
+| [`docs/export-string-format-v1.md`](docs/export-string-format-v1.md) | The `GAE1:` character export string: layout, checksum, the JSON document with the character, equipped items (with the client's stat block for each) and talents. |
 | [`docs/raid-capture-format-v1.md`](docs/raid-capture-format-v1.md) | The raid recording: the session envelope, kills, attendees, loot, and the fingerprint the website uses to merge two officers' recordings of one raid. |
 | [`docs/talent-tree-format-v1.md`](docs/talent-tree-format-v1.md) | A class's talent trees as the game shows them — every tree, each talent's place, ranks, prerequisite and text — which the website's talent calculator is built on. The talent ORDER is the contract: the character export's rank digits follow it. |
 
-Both are versioned. Adding optional fields is fine within a version; changing the meaning of a field or the string layout means a new prefix, and the website's decoders are updated alongside. Keep the copies in both repositories the same.
+All are versioned. Adding optional fields is fine within a version; changing the meaning of a field or the string layout means a new prefix, and the website's decoders are updated alongside. Keep the copies in both repositories the same.
 
-## Things to know before writing it
+## Layout
+
+```
+MintBridge/
+  MintBridge.toc   addon manifest (interface number, load order)
+  Encode.lua       JSON, base64, Adler-32, the GAE1 envelope; pure Lua 5.1, no bit ops
+  Collect.lua      reads the character, equipped items and talents (every API feature-detected)
+  UI.lua           the window: gear list, tooltips, export box, minimap button
+  Core.lua         slash commands, events, debug and self test
+tests/
+  run.py           runs the addon under a mocked WoW API and decodes the result in Python
+  fixtures/        export strings the harness produced, for the website's importer tests
+```
+
+## Tests
+
+```
+python3 tests/run.py            # -v prints the chat output, the window text and the decoded JSON
+python3 tests/run.py --write-fixtures
+```
+
+Needs a Lua 5.1 interpreter — WoW's Lua — on `PATH` (`brew install luajit` on macOS, `apt install luajit` on Debian/Ubuntu) or in `$LUA`. The harness loads the addon files with `setfenv` into a mocked WoW API in three flavours (WoW Forever with last names, Classic Era, a Mainline-style client), opens the window, clicks its buttons, then decodes the export string independently with Python's `base64`, `zlib` and `json` and checks every field against the spec. `--write-fixtures` saves the strings under `tests/fixtures/`; the website's tests can import them so both ends of the paste flow are tested against each other.
+
+## Things to know before changing it
 
 - **Strings are self-reported.** The source is public and strings are plain text, so a string can be hand-edited. The checksum only catches accidental corruption; nothing on the website treats an import as tamper-proof.
-- **WoW only writes an addon's saved variables on a clean logout or `/reload`, never on a crash.** A recording that has not been exported lives in memory until then. A second officer recording the same raid is the real safety net, and a `/reload` between pulls is a cheap habit.
-- **The WoW Forever client is a beta.** Its interface number and which events it fires are not confirmed; feature-detect rather than assume.
-- **Item data comes from the client.** Item names, quality and stats (`GetItemStats`) are read in game and carried in the strings, so the website never needs an item database to display what the addon sends.
+- **Feature-detect, never assume.** The WoW Forever client is a beta; which functions and events it has is not confirmed. Every API call in `Collect.lua` is guarded, and a missing one leaves a field out rather than breaking the export. `/mint debug` reports what a client has.
+- **Item data comes from the client.** Item names, quality, item level and stats (`GetItemStats`) are read in game and carried in the strings, so the website never needs an item database to display what the addon sends.
+- **WoW only writes an addon's saved variables on a clean logout or `/reload`, never on a crash** — and the beta client does not read them back at all. Nothing that matters may live only there.
 
 ## License
 

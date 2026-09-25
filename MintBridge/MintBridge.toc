@@ -1,0 +1,20 @@
+## Interface: 16001
+## Title: Mint Bridge
+## Notes: The in-game side of Minty's Community Manager. Scans your equipped gear and talents and turns them into a string you paste on the guild website's Roster page.
+## Author: Zack
+## Version: 0.1.0
+## SavedVariables: MintBridgeDB
+## IconTexture: Interface\Icons\INV_Misc_Note_01
+## X-License: MIT
+## X-Website: https://github.com/wongz1/mint-community-manager
+
+# 16001 = WoW Forever beta client 1.60.1 (major * 10000 + minor * 100 + patch). Other addons
+# with this number load on the beta client without "out of date" warnings. To read the real
+# number in game:  /mint debug   (or /run print((select(4, GetBuildInfo()))) ).
+# If the addon ever shows as out of date after a patch, tick "Load out of date AddOns" on the
+# AddOns screen at character select.
+
+Encode.lua
+Collect.lua
+UI.lua
+Core.lua

@@ -92,6 +92,7 @@ Keys are emitted in sorted order. A key whose value is unknown is **omitted**, n
 | `gems` | number[] | Non-zero gem item ids in socket order (omitted when none). |
 | `suffix` | number | Random suffix id, e.g. negative for "of the Bear" style items (omitted when none). |
 | `icon` | number or string | **Exactly what the client returned.** A FileDataID number on modern clients, or a texture path string like `Interface\Icons\INV_Jewelry_Necklace_07` on older ones. A number needs a FileDataID-to-image lookup on the website. Treat the icon as best-effort and fall back to a placeholder. |
+| `stats` | object | Optional. The item's stat block exactly as the client's `GetItemStats` reports it, keyed by the client's stat token, e.g. `{ "ITEM_MOD_STAMINA_SHORT": 13, "ITEM_MOD_CRIT_RATING_SHORT": 2 }`. Numbers as given (a weapon's DPS can be fractional). Zero-valued stats are left out, and the key is omitted when the client has no such API or reports nothing for the item. This is what lets the website compare items without an item database. |
 
 Slot ids: 1 Head, 2 Neck, 3 Shoulder, 4 Shirt, 5 Chest, 6 Waist, 7 Legs, 8 Feet, 9 Wrist, 10 Hands, 11 Ring 1, 12 Ring 2, 13 Trinket 1, 14 Trinket 2, 15 Back, 16 Main hand, 17 Off hand, 18 Ranged, 19 Tabard.
 
@@ -112,12 +113,13 @@ The addon's source is public and strings are plain text, so a string can be hand
 
 ```json
 {
-  "addon": { "name": "GuildBridge", "version": "0.2.0" },
+  "addon": { "name": "MintBridge", "version": "0.1.0" },
   "char": { "class": "Warrior", "classFile": "WARRIOR", "faction": "Alliance", "guild": "My Guild",
-            "level": 60, "name": "Theoden", "race": "Human", "realm": "Mock Realm", "region": "US" },
-  "game": { "build": "55555", "toc": 11509, "version": "1.15.9" },
+            "lastName": "Stormwind", "level": 60, "name": "Theoden", "race": "Human", "realm": "Mock Realm", "region": "US" },
+  "game": { "build": "60101", "toc": 16001, "version": "1.60.1" },
   "items": [
-    { "icon": 135001, "id": 12640, "ilvl": 66, "name": "Lionheart Helm", "quality": 4, "slot": 1 },
+    { "icon": 135001, "id": 12640, "ilvl": 66, "name": "Lionheart Helm", "quality": 4, "slot": 1,
+      "stats": { "ITEM_MOD_AGILITY_SHORT": 18, "ITEM_MOD_CRIT_RATING_SHORT": 2, "ITEM_MOD_STRENGTH_SHORT": 18 } },
     { "enchant": 2564, "gems": [2345], "id": 18404, "name": "Onyxia Tooth Pendant", "quality": 4, "slot": 2 }
   ],
   "src": "self",
