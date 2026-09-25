@@ -16,6 +16,8 @@ WoW addons have no network access, so everything moves by copy and paste, one wa
 
 ## Install
 
+Download `MintCommunityTools-v<version>.zip` from the [latest release](https://github.com/wongz1/mint-community-tools/releases/latest) and unzip it into your WoW Forever addons folder, `World of Warcraft/_classic_beta_/Interface/AddOns/`. The zip holds only the `MintCommunityTools` folder. From a checkout of this repository instead:
+
 1. Copy (or symlink) the `MintCommunityTools` folder into your WoW Forever addons folder:
    `World of Warcraft/_classic_beta_/Interface/AddOns/MintCommunityTools`
    so that `MintCommunityTools.toc` ends up at `.../AddOns/MintCommunityTools/MintCommunityTools.toc`.

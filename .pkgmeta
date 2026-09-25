@@ -1,0 +1,18 @@
+# Read by the BigWigs packager (.github/workflows/release.yml).
+# The addon lives in the MintCommunityTools/ subfolder, so that folder becomes the zip's top
+# level and everything else in the repo (tests, docs, workflows) is left out.
+package-as: MintCommunityTools
+
+move-folders:
+  MintCommunityTools/MintCommunityTools: MintCommunityTools
+
+# CHANGELOG.md must not be ignored: the packager reads it for the release notes
+manual-changelog:
+  filename: CHANGELOG.md
+  markup-type: markdown
+
+ignore:
+  - tests
+  - docs
+  - README.md
+  - RELEASING.md

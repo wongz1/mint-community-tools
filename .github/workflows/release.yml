@@ -1,0 +1,37 @@
+# Builds MintCommunityTools-<version>.zip when a version tag (v0.1.0, v0.2.0, ...) is pushed,
+# and publishes it to GitHub Releases. The zip holds only the MintCommunityTools folder (see
+# .pkgmeta), so it unzips straight into Interface/AddOns. See RELEASING.md.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GITHUB_OAUTH: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install LuaJIT
+        run: sudo apt-get update && sudo apt-get install -y luajit
+
+      - name: Run tests
+        run: python3 tests/run.py
+
+      - name: Check the tag matches the addon version
+        run: |
+          toc=$(sed -n 's/^## Version: *//p' MintCommunityTools/MintCommunityTools.toc | tr -d '\r')
+          if [ "v$toc" != "$GITHUB_REF_NAME" ]; then
+            echo "Tag is $GITHUB_REF_NAME but the .toc says version $toc. Bump the version first (RELEASING.md)."
+            exit 1
+          fi
+
+      - name: Package and publish
+        uses: BigWigsMods/packager@v2

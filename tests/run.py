@@ -458,8 +458,18 @@ def run_variant(lua, variant, workdir):
     return len(result["export"])
 
 
+def check_version():
+    """The .toc and Core.lua must agree on the version; the release workflow tags by it."""
+    toc = re.search(r"^## Version:\s*(\S+)", (ADDON_DIR / "MintCommunityTools.toc").read_text(encoding="utf-8"), re.M)
+    core = re.search(r'^ns\.VERSION = "([^"]+)"', (ADDON_DIR / "Core.lua").read_text(encoding="utf-8"), re.M)
+    if not toc or not core or toc.group(1) != core.group(1):
+        raise SystemExit(f"version mismatch: .toc says {toc and toc.group(1)}, Core.lua says {core and core.group(1)}")
+    return toc.group(1)
+
+
 def main():
     lua = find_lua()
+    print(f"version {check_version()}")
     print(f"using {os.path.basename(lua)}")
     failed = False
     with tempfile.TemporaryDirectory() as tmp:
