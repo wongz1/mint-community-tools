@@ -1,4 +1,4 @@
-# Mint Community Manager — in-game addon
+# Mint Community Tools — the in-game addon
 
 The World of Warcraft addon side of [Minty's Community Manager](https://github.com/wongz1/mintys-community-manager), a community website and Discord bot for a WoW Forever (Classic+) guild. This repository is public because an addon ships as readable Lua; the website and bot live in the other repository.
 

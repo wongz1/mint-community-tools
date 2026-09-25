@@ -6,7 +6,7 @@
 ## SavedVariables: MintBridgeDB
 ## IconTexture: Interface\Icons\INV_Misc_Note_01
 ## X-License: MIT
-## X-Website: https://github.com/wongz1/mint-community-manager
+## X-Website: https://github.com/wongz1/mint-community-tools
 
 # 16001 = WoW Forever beta client 1.60.1 (major * 10000 + minor * 100 + patch). Other addons
 # with this number load on the beta client without "out of date" warnings. To read the real
