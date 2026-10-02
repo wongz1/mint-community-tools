@@ -1,7 +1,8 @@
 # Releasing Mint Community Tools
 
 1. Test in game: `/mint` opens the window with your gear, **Export for website** produces a
-   string, and the website's Roster page accepts it.
+   string, and the website's Roster page accepts it; the minimap button sits on the minimap's
+   edge; looting something puts it on the Loot tab, and shift-clicking it links it in chat.
 2. Set the new version in both places, e.g. `0.2.0`:
    - `MintCommunityTools/MintCommunityTools.toc`: `## Version: 0.2.0`
    - `MintCommunityTools/Core.lua`: `ns.VERSION = "0.2.0"`

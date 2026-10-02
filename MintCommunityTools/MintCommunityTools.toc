@@ -1,8 +1,8 @@
 ## Interface: 16001
 ## Title: Mint Community Tools
-## Notes: The in-game side of Minty's Community Manager. Scans your equipped gear and talents and turns them into a string you paste on the guild website's Roster page.
+## Notes: The in-game side of Minty's Community Manager. Exports your gear and talents for the guild website's Roster page, and keeps a log of what drops: who looted it, its tooltip, and a link for chat.
 ## Author: Zack
-## Version: 0.1.0
+## Version: 0.3.0
 ## SavedVariables: MintCommunityToolsDB
 ## IconTexture: Interface\Icons\INV_Misc_Note_01
 ## X-License: MIT
@@ -14,7 +14,17 @@
 # If the addon ever shows as out of date after a patch, tick "Load out of date AddOns" on the
 # AddOns screen at character select.
 
+# Saved.lua works around a WoW Forever beta bug: the client writes addon data to
+# WTF/Account/<account>/SavedVariables/MintCommunityTools.lua but never reads it back. When
+# Saved.lua is a link to that file (LinkSavedSettings.cmd on Windows, link-saved-settings.sh on
+# macOS/Linux), the last save is loaded here as code, so the loot log survives a logout. It is
+# fine for the file to be missing: the game skips it. Once Blizzard fixes the loader, the real
+# data loads afterwards and takes over.
+Saved.lua
 Encode.lua
 Collect.lua
+Loot.lua
 UI.lua
+LootUI.lua
+Minimap.lua
 Core.lua

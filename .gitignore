@@ -4,3 +4,6 @@ __pycache__/
 
 # built by the packager when run locally
 .release/
+
+# a link to the game's save file on the developer's machine (link-saved-settings.sh)
+MintCommunityTools/Saved.lua
