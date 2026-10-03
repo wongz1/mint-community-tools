@@ -4,7 +4,7 @@ The World of Warcraft addon side of [Minty's Community Manager](https://github.c
 
 The addon is called **Mint Community Tools** in game (`/mint`).
 
-**Status:** v0.5.0. Three features, each a tab of the same window: the **minimalist UI** (the game's own interface in the addon's flat skin: action bars, chat, unit frames, a square minimap, a quest tracker and the game menu's windows, each optional and off by default), the **gear scanner** (scan your equipped gear and talents and export them as a string for the website's Roster page) and the **loot tracker** (a log of what drops and who loots it, with tooltips and chat links, which also collects item data for the website's item database). Raid recording and talent tree export are specified (below) but not built yet.
+**Status:** v0.5.1. Three features, each a tab of the same window: the **minimalist UI** (the game's own interface in the addon's flat skin: action bars, chat, unit frames, a square minimap, a quest tracker and the game menu's windows, each optional and off by default), the **gear scanner** (scan your equipped gear and talents and export them as a string for the website's Roster page) and the **loot tracker** (a log of what drops and who loots it, with tooltips and chat links, which also collects item data for the website's item database). Raid recording and talent tree export are specified (below) but not built yet.
 
 ## What the addon does
 

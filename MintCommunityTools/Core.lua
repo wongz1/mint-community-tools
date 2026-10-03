@@ -38,7 +38,7 @@
 
 local ADDON, ns = ...
 ns.NAME = "MintCommunityTools"
-ns.VERSION = "0.5.0"
+ns.VERSION = "0.5.1"
 
 -- True when Saved.lua has already put the last save in place. The client's own loading,
 -- when it works, happens later, at ADDON_LOADED.

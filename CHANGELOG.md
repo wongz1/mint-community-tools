@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.5.1 - 2026-10-03
+
+Mint Community Tools is now on CurseForge. Nothing has changed in game: if you already have
+0.5.0, you do not need to do anything.
+
+- **On CurseForge.** The addon's page is
+  https://www.curseforge.com/wow/addons/mint-community-tools and it is listed for WoW Forever.
+  CurseForge checks every file before listing it, so a new version appears there a little
+  while after it is released.
+- **Every release goes to both places.** From this version on, each new version is published
+  to GitHub and uploaded to CurseForge automatically, and announced in Discord.
+- **GitHub still works.** The latest version is always at
+  https://github.com/wongz1/mint-community-tools/releases/latest on GitHub.
+
 ## 0.5.0 - 2026-10-03
 
 More of the game's interface joins the minimalist UI, and the pieces already there get more
