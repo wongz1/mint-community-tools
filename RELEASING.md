@@ -22,7 +22,8 @@
 
 The Release workflow then runs the tests, checks the tag matches the `.toc` version, builds
 `MintCommunityTools-v0.2.0.zip` (only the `MintCommunityTools` folder, see `.pkgmeta`) and
-publishes it to GitHub Releases. Watch it under the repo's Actions tab.
+publishes it to GitHub Releases, and to CurseForge once that is set up (below). Watch it
+under the repo's Actions tab.
 
 5. Publish the notes to Discord. This is the last step of every release, once the tag is
    pushed (so the post can link to the GitHub release). Look first, then post:
@@ -48,3 +49,26 @@ publishes it to GitHub Releases. Watch it under the repo's Actions tab.
 
 The link to give testers is always the same:
 https://github.com/wongz1/mint-community-tools/releases/latest
+
+## CurseForge
+
+The CurseForge project's ID is `1724233` (also in the `.toc` as `## X-Curse-Project-ID`).
+Every tagged release is uploaded to it as a beta file for WoW Forever 1.60.1, with that
+version's section of `CHANGELOG.md` as its notes.
+
+One-time setup: create an API token at https://authors.curseforge.com/account/api-tokens and
+save it as the repository secret `CF_API_KEY` (GitHub: Settings > Secrets and variables >
+Actions). Until that secret exists the upload step is skipped and releases go to GitHub only.
+
+- The upload is done by `tools/cf_upload.py`, which trims the token: a secret pasted with a
+  trailing newline made the packager's own upload fail with "Missing field metadata".
+- To upload a release that already exists (one made before the secret was set, or one whose
+  upload failed), run the "CurseForge upload" workflow from the Actions tab with the tag, or:
+
+  ```bash
+  gh workflow run cf-upload.yml -f tag=v0.5.0
+  ```
+
+- The upload looks up CurseForge's own id for WoW Forever 1.60.1. When the game moves to a
+  new version, change `1.60.1` in both workflow files.
+

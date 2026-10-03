@@ -1,0 +1,46 @@
+# Uploads an existing GitHub release's zip to CurseForge on demand: for a release made before
+# CurseForge was set up, or when the upload in the Release workflow failed. Run it from the
+# Actions tab (or `gh workflow run cf-upload.yml -f tag=v0.5.0`). The upload uses
+# tools/cf_upload.py, see the note there.
+name: CurseForge upload
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag whose zip to upload, e.g. v0.5.0"
+        required: true
+
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      CF_API_KEY: ${{ secrets.CF_API_KEY }}
+      CF_PROJECT_ID: "1724233"
+    steps:
+      # the current main is checked out (for tools/ and CHANGELOG.md); the zip comes from the tag
+      - uses: actions/checkout@v4
+
+      - name: Fetch the release zip
+        run: |
+          gh release download "${{ inputs.tag }}" --pattern '*.zip' --dir dist
+          ls -l dist
+
+      - name: Build the metadata
+        run: |
+          [ -n "$CF_API_KEY" ] || { echo "the repository secret CF_API_KEY is not set (RELEASING.md)"; exit 1; }
+          version=$(unzip -p "$(ls dist/*.zip | head -1)" MintCommunityTools/MintCommunityTools.toc | sed -n 's/^## Version: *//p' | tr -d '\r')
+          versions=$(curl -sS -H "x-api-token: $CF_API_KEY" https://wow.curseforge.com/api/game/versions)
+          ids=$(echo "$versions" | jq -c '[.[] | select(.gameVersionTypeID == 88568 and .name == "1.60.1") | .id]')
+          echo "version $version, game version ids $ids"
+          [ "$ids" != "[]" ] || { echo "no WoW Forever 1.60.1 entry on CurseForge"; exit 1; }
+          # this version's section of the changelog; its heading may carry a date ("## 0.5.0 - 2026-10-03")
+          changelog=$(awk -v v="## $version" 'index($0, v) == 1 && (length($0) == length(v) || substr($0, length(v) + 1, 1) == " ") {p=1; print; next} /^## / {p=0} p' CHANGELOG.md)
+          [ -n "$changelog" ] || { echo "no '## $version' section in CHANGELOG.md"; exit 1; }
+          jq -n --arg name "v$version" --argjson ids "$ids" --arg cl "$changelog" \
+            '{displayName: $name, gameVersions: $ids, releaseType: "beta", changelog: $cl, changelogType: "markdown"}' > meta.json
+          cat meta.json
+
+      - name: Upload to CurseForge
+        run: python3 tools/cf_upload.py "$CF_PROJECT_ID" meta.json "$(ls dist/*.zip | head -1)"

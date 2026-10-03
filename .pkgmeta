@@ -13,6 +13,7 @@ manual-changelog:
 
 ignore:
   - tests
+  - tools
   - docs
   - README.md
   - RELEASING.md

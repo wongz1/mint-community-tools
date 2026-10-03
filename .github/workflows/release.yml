@@ -1,6 +1,8 @@
 # Builds MintCommunityTools-<version>.zip when a version tag (v0.1.0, v0.2.0, ...) is pushed,
 # and publishes it to GitHub Releases. The zip holds only the MintCommunityTools folder (see
-# .pkgmeta), so it unzips straight into Interface/AddOns. See RELEASING.md.
+# .pkgmeta), so it unzips straight into Interface/AddOns. It also uploads the zip to
+# CurseForge when the repository secret CF_API_KEY is set; without it that step is skipped.
+# See RELEASING.md.
 name: Release
 
 on:
@@ -14,6 +16,11 @@ jobs:
       contents: write
     env:
       GITHUB_OAUTH: ${{ secrets.GITHUB_TOKEN }}
+      HAS_CF_KEY: ${{ secrets.CF_API_KEY != '' }}
+      # CF_API_KEY is given only to the upload step below, not to the packager: the packager
+      # sends the token as pasted, and a secret saved with a trailing newline makes CurseForge
+      # reject the upload ("Missing field metadata"). tools/cf_upload.py trims it.
+      # .github/workflows/cf-upload.yml re-runs the upload for a tag if this step fails.
     steps:
       - uses: actions/checkout@v4
         with:
@@ -35,3 +42,32 @@ jobs:
 
       - name: Package and publish
         uses: BigWigsMods/packager@v2
+
+      - name: Upload to CurseForge
+        if: env.HAS_CF_KEY == 'true'   # the secrets context can't be used in a step's if
+        env:
+          CF_API_KEY: ${{ secrets.CF_API_KEY }}
+          CF_PROJECT_ID: "1724233"
+        run: |
+          set -e
+          zip=$(ls .release/*.zip | grep -v -- '-nolib' | head -1)
+          version=$(sed -n 's/^## Version: *//p' MintCommunityTools/MintCommunityTools.toc | tr -d '\r')
+          echo "file: $zip, version $version"
+
+          # the CurseForge id(s) for WoW Forever 1.60.1 (game version type 88568)
+          versions=$(curl -sS -H "x-api-token: $CF_API_KEY" https://wow.curseforge.com/api/game/versions)
+          ids=$(echo "$versions" | jq -c '[.[] | select(.gameVersionTypeID == 88568 and .name == "1.60.1") | .id]')
+          echo "game version ids: $ids"
+          if [ "$ids" = "[]" ]; then
+            echo "CurseForge has no WoW Forever 1.60.1 entry. Its WoW Forever versions:"
+            echo "$versions" | jq -c '[.[] | select(.gameVersionTypeID == 88568) | .name]'
+            exit 1
+          fi
+
+          # this version's section of the changelog
+          changelog=$(awk '/^## /{n++} n==1' CHANGELOG.md)
+          jq -n --arg name "v$version" --argjson ids "$ids" --arg cl "$changelog" \
+            '{displayName: $name, gameVersions: $ids, releaseType: "beta", changelog: $cl, changelogType: "markdown"}' > meta.json
+          echo "metadata:"; cat meta.json
+
+          python3 tools/cf_upload.py "$CF_PROJECT_ID" meta.json "$zip"
