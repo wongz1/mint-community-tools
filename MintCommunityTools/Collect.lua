@@ -94,6 +94,22 @@ end
 -- UnitName with the last name as its second value (where other clients put the realm), and
 -- has also been seen returning "First Last" as one string. A second value that is this realm's
 -- name is the realm, not a last name.
+-- Is this string the name of the realm the player is on? (What other clients put where WoW
+-- Forever puts a last name.)
+local function isRealm(s)
+    if type(s) ~= "string" then return false end
+    local key = squash(s)
+    if key == "" then return false end
+    local realm = GetRealmName and GetRealmName() or nil
+    if type(realm) == "string" and squash(realm) == key then return true end
+    if GetNormalizedRealmName then
+        local ok, r = pcall(GetNormalizedRealmName)
+        if ok and type(r) == "string" and squash(r) == key then return true end
+    end
+    return false
+end
+Collect.IsRealm = isRealm
+
 -- Returns firstName, lastName (or nil), realm (or nil).
 local function splitName(unit)
     local name, second = UnitName(unit)

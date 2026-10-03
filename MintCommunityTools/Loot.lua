@@ -261,6 +261,9 @@ end
 -- Returns who (nil for yourself), link, count for a loot chat line; nothing for any other line.
 function Loot.ParseLootMessage(msg)
     if type(msg) ~= "string" then return nil end
+    -- Where the game restricts addons (an encounter in progress), chat text arrives as a
+    -- secret value that cannot be matched against. Those lines are not logged.
+    if issecretvalue and issecretvalue(msg) then return nil end
     lootPatterns = lootPatterns or buildLootPatterns()
     for _, p in ipairs(lootPatterns) do
         local caps = { smatch(msg, p.pattern) }

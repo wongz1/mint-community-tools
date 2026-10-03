@@ -1,5 +1,83 @@
 # Changelog
 
+## 0.5.0 - 2026-10-03
+
+More of the game's interface joins the minimalist UI, and the pieces already there get more
+choices. As before, all of it is optional: open `/mint`, go to the **Settings** tab, switch on
+what you want, and `/reload`. If you are updating, restart the game once so the new files load.
+
+**New pieces**
+
+- **Quest tracker.** A plain list of the quests you are tracking, in place of the game's
+  tracker: each title in the colour of its difficulty with its level in front, its objectives
+  under it (finished ones dimmed), and "Ready to turn in" once a quest is done. Click the
+  **Quests** header to fold the list away, click a quest to open it in the quest log, and
+  shift-click a quest to stop tracking it. It has its own box in edit mode. The game's own
+  tracker is hidden while this is on; turn it off on the **Quests** page to have that back.
+- **Game menu.** The Escape menu, the windows it opens (Options, AddOns, Edit Mode, Macros,
+  Help) and the game's confirmation boxes are flat dark panels: no ornate borders or header
+  art. Their buttons, tabs, check boxes, drop-downs, search boxes, sliders and scroll bars are
+  flat too. Its switch is on the **General** page.
+
+**Unit frames**
+
+- **Whole names.** Both of a character's names are shown, not just the first.
+- **Animated 3D portraits.** A new option under Portraits shows the unit's own model in
+  place of the flat picture.
+- **Text and sizes.** On the **Unit frames** page you can now pick the font and font size,
+  the width and height of the player and target frames (and of the two small frames), a size
+  each for buff icons and debuff icons, how many icons go in a row, and whether countdown
+  numbers show on buffs and on debuffs. A size changed in combat applies when combat ends.
+
+**Minimap**
+
+- **Coordinates beside the zone's name.** Your coordinates sit at the right end of the strip
+  above the minimap instead of taking a row under it. A long zone name is cut short before it
+  reaches them; hover the strip to read all of it. The two clocks share one row under the map.
+- **The addon's minimap button works with a round or a square minimap.** It follows the
+  minimap by default. To choose yourself: `/mint minimap round`, `/mint minimap square` or
+  `/mint minimap auto`, or the **Button shape** button on the **General** page, which also
+  has a box to hide the button. Rude Boy's, Cat Facts' and Rat Facts' buttons follow this
+  addon's square minimap as well, from their own latest versions.
+
+**Smaller things**
+
+- **Keyring and reagent bag.** In the bag row, the keyring shows a key and an empty reagent
+  bag slot shows a dimmed herb, instead of two blank squares. The **Action bars** page can
+  leave both out of the row.
+- **Chat backdrop.** It stays behind the chat window wherever the window is, and now takes in
+  the tabs above the text and the edit box below.
+- **Settings pages.** The Settings tab is split into pages (General, Action bars, Chat, Unit
+  frames, Minimap, Quests), picked with the row of buttons across its top. Edit mode, Reset
+  positions and Reload UI are under every page.
+
+Still drawn by the game: the lists that open from a drop-down, and the keybinding buttons in
+Options.
+
+## 0.4.0 - 2026-10-02
+
+The minimalist UI: the game's own interface in the addon's flat skin. Each piece is optional
+and all of it is off until you turn it on: open `/mint`, go to the **Settings** tab (or type
+`/mint ui on`), then `/reload`.
+
+- **Action bars.** The bar art is gone; every button is a flat square with its keybind top
+  right. Bars 1 to 3 stack at the bottom, bars 4 and 5 stand on the right, the pet and
+  stance bars sit above, the bags bottom right, the micro menu beside them (or hidden). The
+  experience bar is a thin strip along the bottom.
+- **Chat.** No frame, tab or edit box art; the edit box is a flat strip under the window;
+  the side buttons are gone (the mouse wheel scrolls). An optional backdrop behind it.
+- **Unit frames.** The addon's own player, target, target-of-target and pet frames: health in
+  class or reaction colour with the name and numbers, power under it with the level,
+  portraits you can turn off. Buffs and debuffs sit above, below, left or right of each
+  frame as you choose, or not at all; the target's debuffs can be limited to your own.
+  Click to target, right-click for the menu, in combat too.
+- **Minimap.** Square, in a thin border, with the zone's name above it and your coordinates
+  and the time (your computer's and the game world's) with it. The mouse wheel zooms.
+- **Edit mode.** `/mint edit` (or the Settings tab) shows every frame as a box to drag;
+  right-click a box to put it back; where you leave them is saved.
+- **Settings tab.** A switch for the whole thing and one per piece, with the choices inside
+  each. Turning a piece on or off applies after a reload; the tab says so.
+
 ## 0.3.0 - 2026-10-02
 
 A new look: the flat, ElvUI-like skin. Nothing changed in what the addon does, saves or

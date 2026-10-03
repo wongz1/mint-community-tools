@@ -4,7 +4,7 @@ The World of Warcraft addon side of [Minty's Community Manager](https://github.c
 
 The addon is called **Mint Community Tools** in game (`/mint`).
 
-**Status:** v0.3.0. Two features, each a tab of the same window: the **gear scanner** (scan your equipped gear and talents and export them as a string for the website's Roster page) and the **loot tracker** (a log of what drops and who loots it, with tooltips and chat links, which also collects item data for the website's item database). Raid recording and talent tree export are specified (below) but not built yet.
+**Status:** v0.5.0. Three features, each a tab of the same window: the **minimalist UI** (the game's own interface in the addon's flat skin: action bars, chat, unit frames, a square minimap, a quest tracker and the game menu's windows, each optional and off by default), the **gear scanner** (scan your equipped gear and talents and export them as a string for the website's Roster page) and the **loot tracker** (a log of what drops and who loots it, with tooltips and chat links, which also collects item data for the website's item database). Raid recording and talent tree export are specified (below) but not built yet.
 
 ## What the addon does
 
@@ -55,6 +55,10 @@ Everything that drops, newest first: what you loot, what your group loots (from 
 
 A small flat square with the addon's note icon on the minimap's edge; its border lights up under the mouse. Left-click opens the window, right-click shows or hides the loot watcher, and dragging moves the button around the minimap's edge. `/mint minimap` hides or shows it; `/mint minimap reset` puts it back.
 
+The button can sit around a round minimap or a square one: `/mint minimap round`, `/mint minimap square` or `/mint minimap auto`, or the **Button shape** button under **Minimap button** on the Settings tab, which also has a checkbox to show or hide it. Round puts it on the circle just outside the map; square puts it on the square just outside the map, in the same direction from the centre and clear of the strips above and below. Auto, the default, follows the minimap: square with this addon's square minimap, or with another addon's that says so through the global function `GetMinimapShape()`, and round otherwise. The button moves within a second when the map changes. If your minimap is square and auto does not notice, choose square.
+
+With its own minimap on, the addon tells other addons' minimap buttons what the map looks like: it answers `GetMinimapShape()` (`"SQUARE"` or `"ROUND"`, a long-standing convention) and `GetMinimapEdgeInsets()` (the room the zone strip and the strips below the map take: above, below, left, right). Rude Boy, Cat Facts and Rat Facts read both, so their buttons sit on the square's edge and clear of the strips. Neither function is replaced if another addon already provides it.
+
 | Command | What it does |
 |---------|--------------|
 | `/mint` | Open or close the window. |
@@ -64,12 +68,31 @@ A small flat square with the addon's note icon on the minimap's edge; its border
 | `/mint watch` | Show or hide the loot watcher. |
 | `/mint items` | Export the items seen since the last export, for the website's item database. `/mint items all` exports every item again. |
 | `/mint minimap` | Show or hide the minimap button; `/mint minimap reset` puts it back in its default place. |
+| `/mint minimap round` | The shape of the minimap the button sits around: `round`, `square`, or `auto` (the default) to follow the minimap. |
+| `/mint ui on` | Turn the minimalist UI on (`off` turns it off; alone, says what is on). Applies after `/reload`. `/mint ui reset` puts every frame back. |
+| `/mint edit` | Edit mode: drag the overhaul's frames where you want them. |
+| `/mint uidump menus` | The same record for the game menu and the windows it opens. Open the menu and each window once first, so that they exist. |
+| `/mint uidump` | Also records what the bag row's buttons are and what clicks on the keyring and reagent slot did. Record what this client's own interface is made of (frame names, the art on them, which functions exist) into the save file, for fixing the overhaul on a client it has not seen. Written to disk at the next `/reload`. |
 | `/mint region EU` | Set your region (US, EU, KR, TW, CN) when the client cannot tell the addon. Without an argument, says which region is being used and why. |
 | `/mint json` | The export as raw JSON in the window, for debugging. |
 | `/mint debug` | Client build, interface number and which APIs exist. Paste this in bug reports. |
 | `/mint selftest` | Run the built-in encoder tests. |
 
 `/mct` and `/gb` do the same as `/mint`.
+
+### The minimalist UI
+
+The **Settings** tab turns the overhaul on, piece by piece. It is **off by default**: turn it on, `/reload`, then `/mint edit` to arrange it. Everything is the addon's flat skin: dark panels, 1px black borders, one accent colour.
+
+- **Action bars.** The game's own buttons, so keybinds, paging and cooldowns are untouched, drawn flat: the icon in a 1px border, the keybind top right, no round button art, no gryphons. Bars 1 to 3 stack at the bottom, bars 4 and 5 stand on the right, the pet and stance bars sit above, the bags bottom right (the keyring, drawn with a key, and the reagent bag slot, drawn with a dimmed herb while it is empty, can be left out of the row), the micro menu beside them (it can be hidden; Escape and the keybinds still open everything). The experience bar is the addon's own: a thin flat bar under bar 1 with rested experience behind it (hover for the numbers), which shows your watched reputation once there is no experience left to gain. The gryphons and the rest of the bar art are removed by sweeping every texture off the bar's art frames, not by name, since the names differ between clients.
+- **Chat.** The game's chat frames with the art gone: plain-text tabs, a flat edit box under the window, no side buttons (the mouse wheel scrolls). An optional backdrop behind the main window: it is fastened to the chat window itself, so it stays behind it wherever the window goes, and takes in the tabs above the text and the edit box below.
+- **Unit frames.** The addon's own player, target, target-of-target and pet frames. The health bar is in class colour for players and reaction colour for everything else, with the name and the numbers on it; the power bar under it carries the level. Names are whole: a WoW Forever character's first and last name both show, cut short with dots only when the bar runs out of room. **Portraits** can be turned off, or be **animated 3D portraits**: the unit's own model in place of the flat picture (the flat picture stands in for a unit too far away to be drawn). The Unit frames page of the Settings tab also sets the **font** of the text on the frames (the game's own fonts, plus LibSharedMedia's when another addon has brought that library) and its **size**, the **width and height** of the player and target frames and of the two small frames, the **size of buff icons and of debuff icons**, how many icons go in a row, and whether the **countdown numbers** show on buffs and on debuffs. A size changed in combat applies when combat ends. **Buffs and debuffs** are rows of icons on the side of the frame you pick for each (above, below, left, right, or off), debuffs nearest the frame; hover one for its tooltip; the target's debuffs can be limited to your own. Click to target, right-click for the unit's menu, in combat too. The pet frame, combo points and the target's cast bar are the game's, re-anchored.
+- **Minimap.** Square, in a 1px border, on a mover; the mouse wheel zooms. The zone's name sits in a strip above it in the colour of its PvP standing, with your coordinates at the strip's right end; a name too long for the room that leaves is cut short with dots rather than running into the coordinates, and hovering the strip shows the whole name. Below the map sit your computer's time and the game world's time, whichever you switch on, on one row. With the zone strip off, the coordinates go below the map as well. The zoom buttons, the round border, the calendar and the game's own clock are gone; tracking, mail and the battleground icon stay.
+- **Quest tracker.** The addon's own list of the quests you are tracking, in place of the game's tracker: a flat header strip with the count, then each quest's title in the colour of its difficulty (with its level in front, unless you turn that off) and its objectives under it, what is done dimmed, "Ready to turn in" once the quest is complete. Click the header to fold the list away, a quest to open it in the quest log, shift-click a quest to stop tracking it. An optional backdrop sits behind the list, and it stops growing at a set height and says how many more there are. The game's own tracker is hidden while this is on (the game puts it back some time after login; the addon looks once a second and hides it again), which also hides anything else it shows (and its quest item buttons); turn the piece off on the Quests page of the Settings tab to have it back.
+- **Game menu.** The Escape menu, the windows it opens (Options, AddOns, Edit Mode, Macros, Help) and the game's confirmation boxes lose their ornate border, header art and textured background for a flat dark panel with a 1px border. Inside them: push buttons are flat squares whose border lights up under the mouse; a close button is a flat square with an x; tabs are flat with the open one's border lit; check boxes are flat squares that fill with the accent colour; drop-downs and search boxes are flat panels; sliders are a thin bar with a flat thumb; scroll bars a thin dark track with a flat thumb; framed areas get a 1px border; the options window's category headings lose their banners. Still the game's own: the lists that drop down from a drop-down, keybinding buttons, and the scroll bars' arrows. Its switch is on the General page.
+- **Edit mode.** `/mint edit`, or the button on the Settings tab, shows every frame as a labelled box: drag it, right-click it to put it back, **Done** when finished. Positions are saved. **Reset positions** puts everything back.
+
+Turning the whole overhaul or one piece on or off changes the game's own frames, which only happens at a reload; the Settings tab says "Reload to apply" and has the button. Portraits, aura rows, the minimap strips and the quest list change at once. The Settings tab is split into pages (General, Action bars, Chat, Unit frames, Minimap, Quests) picked with the row of buttons across its top; Edit mode, Reset positions and Reload UI sit under whichever page is showing.
 
 ### The WoW Forever beta client
 
@@ -117,6 +140,15 @@ MintCommunityTools/
   UI.lua           the window and its tabs, the Gear tab, the flat skin and the shared widgets (ns.W)
   LootUI.lua       the Loot tab and the loot watcher
   Minimap.lua      the minimap button
+  Overhaul.lua     the minimalist UI: settings, movers, edit mode, applying it at login
+  ActionBars.lua   the action bars, pet and stance bars, bags and micro menu, flat and on movers
+  Chat.lua         the chat window with the art gone, on a mover
+  UnitFrames.lua   the addon's own player, target and target-of-target frames, with aura rows
+  Map.lua          the square minimap, the zone above it, coordinates and the time below it
+  Quests.lua       the quest tracker: tracked quests and their objectives as a plain list
+  Menus.lua        the game menu and the windows it opens, flat
+  SettingsUI.lua   the Settings tab
+  Dump.lua         /mint uidump: a record of this client's own frames
   Core.lua         saved data, slash commands, events, debug and self test
   Saved.lua        not in the repository: a link to your save file (see the beta client notes)
   link-saved-settings.sh, LinkSavedSettings.cmd   make that link
@@ -139,6 +171,8 @@ Needs a Lua 5.1 interpreter — WoW's Lua — on `PATH` (`brew install luajit` o
 - **Strings are self-reported.** The source is public and strings are plain text, so a string can be hand-edited. The checksum only catches accidental corruption; nothing on the website treats an import as tamper-proof.
 - **Feature-detect, never assume.** The WoW Forever client is a beta; which functions and events it has is not confirmed. Every API call in `Collect.lua` is guarded, and a missing one leaves a field out rather than breaking the export. `/mint debug` reports what a client has.
 - **Item data comes from the client.** Item names, quality, item level and stats (`GetItemStats`) are read in game and carried in the strings, so the website never needs an item database to display what the addon sends.
+- **Secret values.** The WoW Forever client is built on the newest engine, which hands addons some unit numbers (current health and power, an aura's stacks and timing, chat text during an encounter) as *secret values*: they may be stored, passed to a status bar, font string or cooldown, and run through `string.format`, but comparing one, doing arithmetic on it, indexing it or using it as a table key is an error. Check `issecretvalue(v)` before doing any of those to something a unit API returned; `UnitFrames.lua` shows the pattern. The test harness's "mainline" client hands out secret values that fail the same way, so a slip is caught there.
+- **The overhaul changes the game's own frames once per session.** It hides and re-anchors Blizzard's frames at login and cannot put them back without a reload, so every switch that touches them says so. It is off by default until it has been proven on the real client; `Overhaul.DEFAULTS.enabled` is the one place to flip that.
 - **WoW only writes an addon's saved variables on a clean logout or `/reload`, never on a crash** — and the beta client does not read them back at all. Nothing that matters may live only there.
 
 ## License

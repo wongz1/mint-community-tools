@@ -8,6 +8,7 @@
              the item's tooltip), a summary line, and the export string to paste on the
              website's Roster page. Refreshes by itself when you change gear.
       Loot   what has dropped and who got it (LootUI.lua).
+      Settings   the minimalist UI's switches (SettingsUI.lua).
 
     Style: flat and ElvUI-like, with none of Blizzard's frame art. Every window, panel,
     button and box is a WHITE8X8 backdrop with a 1px solid black border (one physical
@@ -53,6 +54,7 @@ local QUALITY_COLOR = W.QUALITY_COLOR
 local TABS = {
     { key = "gear", label = "Gear" },
     { key = "loot", label = "Loot" },
+    { key = "settings", label = "Settings" },
 }
 
 local ui = {}   -- the widgets, also reached by the tests as ns.ui
@@ -303,7 +305,10 @@ function W.clock(ts)
     return date and date("%H:%M", ts) or tostring(ts)
 end
 
+-- 12345 -> "12,345". A secret number (see UnitFrames.lua) can be shown but not read, so it
+-- comes back as it is, without separators.
 function W.commas(n)
+    if issecretvalue and issecretvalue(n) then return tostring(n) end
     local s = tostring(n or 0)
     local out = s:reverse():gsub("(%d%d%d)", "%1,"):reverse()
     return (out:gsub("^,", ""))
@@ -629,8 +634,10 @@ end
 local function refreshCurrent()
     if current == "gear" then
         UI.Refresh()
-    elseif ns.LootUI then
+    elseif current == "loot" and ns.LootUI then
         ns.LootUI.Refresh()
+    elseif current == "settings" and ns.SettingsUI then
+        ns.SettingsUI.Refresh()
     end
 end
 
@@ -670,7 +677,8 @@ local function build()
     -- tab's copy box grows into the difference.
     local gearHeight = buildGear(ui.panels.gear)
     local lootHeight = ns.LootUI.Build(ui.panels.loot, f) or 0
-    f:SetHeight(-PANEL_TOP + math.max(gearHeight, lootHeight))
+    local settingsHeight = ns.SettingsUI and ns.SettingsUI.Build(ui.panels.settings, f) or 0
+    f:SetHeight(-PANEL_TOP + math.max(gearHeight, lootHeight, settingsHeight))
 
     f:SetScript("OnShow", function() selectTab(current) end)
     f:SetScript("OnHide", function()

@@ -1,8 +1,8 @@
 ## Interface: 16001
 ## Title: Mint Community Tools
-## Notes: The in-game side of Minty's Community Manager. Exports your gear and talents for the guild website's Roster page, and keeps a log of what drops: who looted it, its tooltip, and a link for chat.
+## Notes: The in-game side of Minty's Community Manager. Exports your gear and talents for the guild website's Roster page, keeps a log of what drops, and can give the game a flat, minimalist UI: action bars, chat, unit frames and a square minimap, each optional.
 ## Author: Zack
-## Version: 0.3.0
+## Version: 0.5.0
 ## SavedVariables: MintCommunityToolsDB
 ## IconTexture: Interface\Icons\INV_Misc_Note_01
 ## X-License: MIT
@@ -27,4 +27,13 @@ Loot.lua
 UI.lua
 LootUI.lua
 Minimap.lua
+Overhaul.lua
+ActionBars.lua
+Chat.lua
+UnitFrames.lua
+Map.lua
+Quests.lua
+Menus.lua
+SettingsUI.lua
+Dump.lua
 Core.lua

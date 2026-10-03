@@ -8,6 +8,11 @@
     /mint watch              show or hide the loot watcher
     /mint items [all]        export the items seen for the website: what is new, or all of them
     /mint minimap [show | hide | reset]   the minimap button
+    /mint minimap round | square | auto   the shape of the minimap the button sits around
+    /mint ui [on | off | reset]   the minimalist UI overhaul (Settings tab); reset puts every frame back
+    /mint edit               edit mode: drag the overhaul's frames where you want them
+    /mint uidump [menus]     record what this client's own interface is made of (for bug reports);
+                             "menus" records the game menu and the windows it opens instead
     /mint region XX          set your region (US, EU, KR, TW, CN) if the client cannot tell the addon
     /mint json               the gear export as raw JSON in the window (for debugging)
     /mint debug              print client build info and which APIs exist (paste this in bug reports)
@@ -17,7 +22,7 @@
     /mct and /gb do the same as /mint.
 
     MintCommunityToolsDB (account wide):
-        minimap      { shown, angle } for the minimap button
+        minimap      { shown, angle, shape } for the minimap button; shape is auto, round or square
         loot         { log = the last 500 drops, minQuality = the filter, watch = is the loot
                        watcher shown, watchAt = where it was left }
         items        [item ID] = the item as the website's item database takes it, plus
@@ -33,7 +38,7 @@
 
 local ADDON, ns = ...
 ns.NAME = "MintCommunityTools"
-ns.VERSION = "0.3.0"
+ns.VERSION = "0.5.0"
 
 -- True when Saved.lua has already put the last save in place. The client's own loading,
 -- when it works, happens later, at ADDON_LOADED.
@@ -55,6 +60,7 @@ function ns.LoadDB()
     local db = MintCommunityToolsDB
     if type(db.minimap) ~= "table" then db.minimap = {} end
     if db.minimap.shown == nil then db.minimap.shown = true end
+    if db.minimap.shape ~= "round" and db.minimap.shape ~= "square" then db.minimap.shape = "auto" end
     -- an older version kept the angle at the top level
     if db.minimapAngle and not db.minimap.angle then db.minimap.angle = db.minimapAngle end
     db.minimapAngle = nil
@@ -64,6 +70,7 @@ function ns.LoadDB()
     if db.loot.watch == nil then db.loot.watch = false end
     if type(db.items) ~= "table" then db.items = {} end
     ns.db = db
+    if ns.Overhaul then ns.Overhaul.Settings() end
     return db
 end
 
@@ -182,6 +189,15 @@ local function doMinimap(action)
         say("minimap button back at its default place.")
         return
     end
+    if action == "auto" or action == "round" or action == "square" then
+        ns.SetMinimapShape(action)
+        if action == "auto" then
+            say(("minimap button follows the minimap's shape (%s right now)."):format(ns.MinimapShape()))
+        else
+            say(("minimap button sits around a %s minimap. /mint minimap auto follows the minimap's shape."):format(action))
+        end
+        return
+    end
     local show = (action == "show") or (action ~= "hide" and not ns.DB().minimap.shown)
     ns.SetMinimapShown(show)
     say("minimap button " .. (show and "shown. Drag it around the minimap to move it." or "hidden. /mint minimap shows it again."))
@@ -286,6 +302,12 @@ SlashCmdList["MINTCOMMUNITYTOOLS"] = function(msg)
         ns.LootUI.ExportItems(arg == "all")
     elseif cmd == "minimap" then
         doMinimap(arg)
+    elseif cmd == "ui" then
+        ns.Overhaul.Command(arg)
+    elseif cmd == "edit" then
+        ns.Overhaul.ToggleEdit()
+    elseif cmd == "uidump" then
+        ns.Dump.Run(arg)
     elseif cmd == "region" then
         doRegion(arg)
     elseif cmd == "debug" then
@@ -294,7 +316,7 @@ SlashCmdList["MINTCOMMUNITYTOOLS"] = function(msg)
         doSelfTest()
     else
         say("commands: /mint (open the window), /mint export, /mint scan, /mint loot, /mint watch, /mint items, "
-            .. "/mint minimap, /mint region, /mint json, /mint debug, /mint selftest")
+            .. "/mint ui on|off, /mint edit, /mint minimap, /mint region, /mint json, /mint debug, /mint selftest")
     end
 end
 
@@ -339,19 +361,25 @@ events:SetScript("OnEvent", function(self, event, ...)
         ns.Loot.onChange = ns.LootUI.Refresh
         pcall(self.RegisterEvent, self, "PLAYER_LOGIN")
         pcall(self.RegisterEvent, self, "PLAYER_ENTERING_WORLD")
+        pcall(self.RegisterEvent, self, "PLAYER_REGEN_ENABLED")
         for _, name in ipairs(GEAR_EVENTS) do pcall(self.RegisterEvent, self, name) end
         for _, name in ipairs(ns.Loot.EVENTS) do pcall(self.RegisterEvent, self, name) end
     elseif event == "PLAYER_LOGIN" then
+        pcall(ns.Overhaul.Apply)
         pcall(ns.InitMinimap)
         pcall(ns.LootUI.InitWatch)
         announce()
     elseif event == "PLAYER_ENTERING_WORLD" then
         if ns.AdoptLateDB() then
             ns.loadedFromDisk = true
+            pcall(ns.Overhaul.Apply)
             pcall(ns.InitMinimap)
             pcall(ns.LootUI.InitWatch)
             say("the game handed over the saved data late; adopted it.")
         end
+        pcall(ns.Overhaul.OnEnteringWorld)
+    elseif event == "PLAYER_REGEN_ENABLED" then
+        pcall(ns.Overhaul.OnCombatEnd)
     elseif LOOT_EVENT[event] then
         ns.Loot.OnEvent(event, ...)
     elseif event == "UNIT_INVENTORY_CHANGED" then
