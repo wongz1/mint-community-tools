@@ -38,7 +38,7 @@ ROOT = Path(__file__).resolve().parent.parent
 ADDON_DIR = ROOT / "MintCommunityTools"
 # The .toc's load order, without Saved.lua (a link to the game's save file; absent here).
 FILES = ["Encode.lua", "Collect.lua", "Loot.lua", "UI.lua", "LootUI.lua", "Minimap.lua",
-         "Overhaul.lua", "ActionBars.lua", "Chat.lua", "UnitFrames.lua", "Map.lua", "Quests.lua", "Menus.lua", "SettingsUI.lua", "Dump.lua", "Core.lua"]
+         "Overhaul.lua", "ActionBars.lua", "Chat.lua", "UnitFrames.lua", "Map.lua", "Quests.lua", "Menus.lua", "Bags.lua", "SettingsUI.lua", "Dump.lua", "Core.lua"]
 VARIANTS = ["forever", "classic", "mainline"]
 VERBOSE = "-v" in sys.argv
 # --write-fixtures saves the export strings the addon actually produced, for the website's
@@ -102,13 +102,30 @@ local function stub(name, template)
       if k == "SetUnit" then rawset(self, "_unit", (...)); return end
       if k == "SetFont" then rawset(self, "_font", { ... }); return end
       if k == "SetColorTexture" then rawset(self, "_colorTexture", { ... }); return end
+      if k == "SetTexCoord" then rawset(self, "_texCoord", { ... }); return end
+      if k == "SetWidth" then rawset(self, "_width", (...)); return end
+      if k == "SetWordWrap" then rawset(self, "_wrap", (...) and true or false); return end
+      -- a font string with a width says how tall its wrapped text is: 12 a line, about 5.6 a letter
+      if k == "GetStringHeight" then
+        local w, text = rawget(self, "_width"), rawget(self, "_text")
+        if type(w) == "number" and type(text) == "string" then return math.max(1, math.ceil(#text * 5.6 / w)) * 12 end
+        return nil
+      end
+      if k == "GetFontString" then
+        local fs = rawget(self, "_fontString")
+        if not fs then fs = stub(); rawset(self, "_fontString", fs) end
+        return fs
+      end
       if k == "HookScript" then
+        -- hooks add up, as in the game: each one runs after those hooked before it
         local kind, fn = ...
         local hooks = rawget(self, "_hooks") or {}
-        hooks[kind] = fn
+        local before = hooks[kind]
+        hooks[kind] = before and function(...) before(...); fn(...) end or fn
         rawset(self, "_hooks", hooks)
         return
       end
+      if k == "EnableMouse" then rawset(self, "_mouse", (...) and true or false); return end
       if k == "SetHideCountdownNumbers" then rawset(self, "_hideNumbers", (...)); return end
       if k == "SetValue" then rawset(self, "_value", (...)); return end
       if k == "SetMinMaxValues" then rawset(self, "_minmax", { ... }); return end
@@ -197,7 +214,7 @@ local CHAT_OPEN = true      -- is a chat edit box open for ChatEdit_InsertLink t
 local env = {
   string = string, table = table, math = math, type = type, pairs = pairs, ipairs = ipairs,
   tostring = tostring, tonumber = tonumber, pcall = pcall, error = error, select = select,
-  unpack = unpack, next = next, setmetatable = setmetatable, rawget = rawget, rawset = rawset,
+  unpack = unpack, next = next, setmetatable = setmetatable, getmetatable = getmetatable, rawget = rawget, rawset = rawset,
   print = function(...)
     local t = {}
     for i = 1, select("#", ...) do t[#t + 1] = tostring((select(i, ...))) end
@@ -208,7 +225,18 @@ local env = {
   UIParent = stub("UIParent"), Minimap = MINIMAP, GameTooltip = stub("GameTooltip"),
   ChatFontNormal = {}, GameFontHighlight = {}, GameFontHighlightSmall = {},
   SlashCmdList = {}, UISpecialFrames = {},
-  CreateFrame = function(_, name, _, template) return stub(name, template) end,
+  CreateFrame = function(_, name, _, template)
+    -- The overhaul's hidden parent is built as the game builds a frame: a table whose methods
+    -- come from a table of methods through its metatable, so that what the addon does to
+    -- that metatable is really exercised. Everything else is the catch-all stub.
+    if name == "MintCommunityToolsHider" then
+      local methods = { Hide = function(self) rawset(self, "_shown", false) end, GetName = function(self) return rawget(self, "_name") end }
+      local f = setmetatable({ _name = name, _scripts = {}, _events = {}, _shown = true }, { __index = methods })
+      table.insert(out.frames, f)
+      return f
+    end
+    return stub(name, template)
+  end,
   GetCursorPosition = function() return 900, 800 end,
   UnitExists = function() return true end,
   UnitName = function() return "Th\195\169oden", "Stormwind" end,
@@ -270,6 +298,7 @@ for _, n in ipairs({
   "MinimapCluster", "MinimapBorder", "MinimapZoomIn", "MinimapZoomOut", "MiniMapWorldMapButton", "MinimapZoneTextButton",
   "GameTimeFrame", "TimeManagerClockButton", "MiniMapTracking", "MiniMapMailFrame",
   "ObjectiveTrackerFrame", "QuestWatchFrame",
+  "StatusTrackingBarManager", "MainStatusTrackingBarContainer", "SecondaryStatusTrackingBarContainer",
 }) do named(n) end
 for i = 1, 12 do named("ActionButton" .. i); named("ActionButton" .. i .. "Icon"); named("ActionButton" .. i .. "HotKey"); named("MultiBarBottomLeftButton" .. i) end
 for i = 1, 10 do named("PetActionButton" .. i) end
@@ -307,7 +336,13 @@ do
   MENU.options, MENU.optionsArt = pushButton("Center")
   MENU.plainArt = art()
   MENU.plain = holding(typed(stub(), "Button"), { MENU.plainArt })   -- art not in three pieces: still a button of the menu
-  MENU.children = { MENU.options, MENU.plain }
+  MENU.edit = pushButton("Center")
+  rawset(MENU.edit, "GetText", function() return "Edit Mode" end)
+  rawset(MENU.edit, "GetFrameLevel", function() return 5 end)
+  MENU.children = { MENU.options, MENU.plain, MENU.edit }
+  MENU.SHOWN = false
+  rawset(MENU.frame, "IsShown", function() return MENU.SHOWN end)
+  rawset(MENU.frame, "GetFrameStrata", function() return "DIALOG" end)
   holding(MENU.frame, { MENU.ownArt, words() }, MENU.children)
 
   SP.frame = typed(named("SettingsPanel"), "Frame")
@@ -390,6 +425,59 @@ do
   POP.button = holding(typed(stub(), "Button"), { POP.buttonArt })
   rawset(POP.frame, "ButtonContainer", holding(typed(stub(), "Frame"), {}, { POP.button }))
   holding(POP.frame, { POP.alert }, {})
+
+  -- the combined backpack: a window like the others, with item slots in it. A slot is a
+  -- button with a picture (icon), the art of an empty slot behind it, and a frame the game
+  -- shows and colours by the item's quality (IconBorder).
+  local BAG = {}
+  MENU.bag = BAG
+  local function slot(quality)
+    local b, icon, border, slotArt = typed(stub(), "Button"), art(), art(), art()
+    local state = { shown = quality ~= nil, color = quality or { 1, 1, 1 } }
+    rawset(border, "IsShown", function() return state.shown end)
+    rawset(border, "GetVertexColor", function() return state.color[1], state.color[2], state.color[3], 1 end)
+    rawset(border, "SetVertexColor", function(self, r, g, bl) state.color = { r, g, bl } end)
+    rawset(border, "Show", function() state.shown = true end)
+    rawset(border, "Hide", function() state.shown = false end)
+    -- the picture: the game's empty-slot art (an atlas) until an item's own picture is set
+    local shows = { atlas = quality == nil and "bags-item-slot64" or nil }
+    rawset(icon, "GetAtlas", function() return shows.atlas end)
+    rawset(icon, "SetAtlas", function(self, name) shows.atlas = name end)
+    rawset(icon, "SetTexture", function(self, texture) shows.atlas = nil; rawset(self, "_texture", texture) end)
+    rawset(b, "icon", icon); rawset(b, "IconBorder", border)
+    rawset(b, "GetNormalTexture", function() return slotArt end)
+    return holding(b, { icon, border, slotArt }), icon, border, slotArt
+  end
+  BAG.slot = slot
+  BAG.frame = typed(named("ContainerFrameCombinedBags"), "Frame")
+  BAG.SHOWN = false
+  rawset(BAG.frame, "IsShown", function() return BAG.SHOWN end)
+  rawset(BAG.frame, "UpdateItems", function() end)   -- the game lays the bag's items out through this
+  rawset(BAG.frame, "GetWidth", function() return 430 end)
+  rawset(BAG.frame, "GetHeight", function() return 179 end)
+  -- the game places its bag windows itself, each time one opens or closes
+  env.UpdateContainerFrameAnchors = function() BAG.frame:SetPoint("BOTTOMRIGHT", env.UIParent, "BOTTOMRIGHT", -105, 90) end
+  BAG.nineArt, BAG.portrait, BAG.closeArt = art(), art(), art()
+  rawset(BAG.frame, "NineSlice", holding(typed(stub(), "Frame"), { BAG.nineArt }))
+  rawset(BAG.frame, "PortraitContainer", holding(typed(stub(), "Frame"), { BAG.portrait }))
+  BAG.close = holding(typed(stub(), "Button"), { BAG.closeArt })
+  rawset(BAG.frame, "CloseButton", BAG.close)
+  BAG.epic, BAG.epicIcon, BAG.epicBorder, BAG.epicSlot = slot({ 0.64, 0.21, 0.93 })
+  BAG.empty, BAG.emptyIcon, BAG.emptyBorder = slot(nil)
+  BAG.money, BAG.coinArt = typed(stub(), "Frame"), art()
+  local coinBorder = holding(typed(stub(), "Frame"), { BAG.coinArt })
+  rawset(coinBorder, "Left", BAG.coinArt)
+  rawset(BAG.money, "Border", coinBorder)
+  holding(BAG.money, {}, { coinBorder })
+  BAG.search, BAG.searchArt = typed(stub(), "EditBox"), art()
+  rawset(BAG.search, "Left", BAG.searchArt); rawset(BAG.search, "Right", art()); rawset(BAG.search, "Middle", art())
+  holding(BAG.search, {})
+  -- the menu behind the portrait, and the sort button: buttons whose art is a picture
+  BAG.menuArt, BAG.sortArt = art(), art()
+  BAG.menu = holding(typed(named("ContainerFrameCombinedBagsPortraitButton"), "Button"), { BAG.menuArt })
+  BAG.sort = holding(typed(named("BagItemAutoSortButton"), "Button"), { BAG.sortArt })
+  BAG.children = { BAG.close, BAG.epic, BAG.empty, BAG.money, BAG.search, BAG.menu, BAG.sort }
+  holding(BAG.frame, {}, BAG.children)
 end
 
 local TARGET_EXISTS = false
@@ -414,7 +502,19 @@ env.GetZonePVPInfo = function() return "friendly" end
 env.C_Map = { GetBestMapForUnit = function() return 1429 end, GetPlayerMapPosition = function() return { x = 0.523, y = 0.481 } end }
 env.Minimap_ZoomIn = function() ZOOM = ZOOM + 1 end
 env.Minimap_ZoomOut = function() ZOOM = ZOOM - 1 end
-env.hooksecurefunc = function() end
+-- As the game's: hooksecurefunc("Name", fn) or hooksecurefunc(object, "Method", fn) runs fn
+-- after the function it hooks, with the same arguments.
+env.hooksecurefunc = function(a, b, c)
+  local owner, name, fn
+  if type(a) == "string" then owner, name, fn = env, a, b else owner, name, fn = a, b, c end
+  local original = owner[name]
+  if type(original) ~= "function" then return end
+  rawset(owner, name, function(...)
+    local results = { original(...) }
+    fn(...)
+    return unpack(results)
+  end)
+end
 env.UnitHealth = function(u) return u == "target" and 50 or HEALTH end
 env.UnitHealthMax = function(u) return u == "target" and 100 or 2000 end
 env.UnitPower = function() return 600 end
@@ -587,6 +687,20 @@ elseif VARIANT == "mainline" then
 end
 local SHIFT = false
 env.IsShiftKeyDown = function() return SHIFT end
+env.HUD_EDIT_MODE_MENU = "Edit Mode"
+-- The chat windows and the edit box say what font they have, as the game's do: Arial at 14
+-- until something sets another. The game's own way of setting a window's text size is here too.
+for _, n in ipairs({ "ChatFrame1", "ChatFrame2", "ChatFrame1EditBox" }) do
+  rawset(env[n], "GetFont", function(self)
+    local f = rawget(self, "_font")
+    if f then return f[1], f[2], f[3] end
+    return "Fonts\\ARIALN.TTF", 14, ""
+  end)
+end
+local CHAT_SIZES = {}
+env.FCF_SetChatWindowFontSize = function(_, chatFrame, size) CHAT_SIZES[chatFrame] = size end
+local PANELS_HIDDEN = {}
+env.HideUIPanel = function(f) table.insert(PANELS_HIDDEN, f) end
 
 -- The target, when there is one, is Hogger; the target's target is the player.
 local playerName = env.UnitName
@@ -1448,6 +1562,84 @@ if S.enabled then
     env.ChatFrame1:SetPoint("BOTTOMLEFT", env.UIParent, "BOTTOMLEFT", 0, 0)
     fire("EDIT_MODE_LAYOUTS_UPDATED")
     assert(env.ChatFrame1._point[2] == mover("chat"), "the game's layout moved the window: it is put back on its mover")
+
+    -- The game fastens the window elsewhere at other moments too (it may act on that event
+    -- after the addon, or when its own edit mode closes). A window off its mover does not
+    -- follow the mover's box: a look once a second puts it back.
+    local C = ns.Chat
+    local function takeAway() env.ChatFrame1:SetPoint("BOTTOMLEFT", env.UIParent, "BOTTOMLEFT", 30, 60) end
+    local function onMover() return env.ChatFrame1._point[2] == mover("chat") end
+    local function tick(dt) C.events._scripts.OnUpdate(C.events, dt) end
+    assert(C.Check() == false, "on its mover there is nothing to do")
+    takeAway()
+    C.sinceCheck = 0
+    tick(0.5)
+    assert(not onMover(), "not before a second has passed")
+    tick(0.6)
+    assert(onMover() and bd._pointsBy.TOPLEFT[2] == env.ChatFrame1, "then the window is back on its mover, the backdrop still on the window")
+    -- the game acts on the layout event after the addon has: the next look is at once
+    fire("EDIT_MODE_LAYOUTS_UPDATED")
+    takeAway()
+    tick(0.01)
+    assert(onMover(), "a move made right after the layout event is undone on the next frame")
+    -- not while the game's own edit mode is open, nor with a mouse button down
+    local manager = stub("EditModeManagerFrame")
+    local OPEN = true
+    rawset(manager, "IsShown", function() return OPEN end)
+    rawset(manager, "IsEditModeActive", nil)
+    env.EditModeManagerFrame = manager
+    takeAway()
+    assert(C.Check() == false and not onMover(), "left alone while the game's own edit mode is open")
+    OPEN = false
+    env.IsMouseButtonDown = function() return true end
+    assert(C.Check() == false and not onMover(), "and while a mouse button is down (a window being dragged by its tab)")
+    env.IsMouseButtonDown = function() return false end
+    assert(C.Check() == true and onMover(), "put back once the mouse is let go")
+    env.EditModeManagerFrame, env.IsMouseButtonDown = nil, nil
+
+    -- The Chat page: the window's width and height, and the size and font of its text.
+    local sui = ns.settingsui
+    local ARIAL, FRIZ = "Fonts\\ARIALN.TTF", "Fonts\\FRIZQT__.TTF"
+    local function step(path, dir) click("MintCommunityToolsSetting" .. (dir > 0 and "More_" or "Less_") .. path:gsub("%.", "_")) end
+    assert(S.chat.fontSize == 0 and S.chat.font == "default" and rawget(env.ChatFrame1, "_font") == nil and next(CHAT_SIZES) == nil,
+      "until something is chosen the chat's text is left as the game has it")
+    assert(sui.steppers["chat.fontSize"].text:GetText() == "Text size: 14" and sui.chatFont:GetText() == "Font: as the game has it",
+      "and the page shows what the game has: " .. sui.steppers["chat.fontSize"].text:GetText())
+    assert(mover("chat")._size[1] == 400 and mover("chat")._size[2] == 180 and sui.steppers["chat.width"].text:GetText() == "Width: 400", "the default size")
+    -- size: the mover's box and the window with it
+    step("chat.width", 1); step("chat.height", -1)
+    assert(S.chat.width == 410 and S.chat.height == 170 and mover("chat")._size[1] == 410 and mover("chat")._size[2] == 170, "a step each way: " .. S.chat.width .. "x" .. S.chat.height)
+    assert(onMover() and env.ChatFrame1._pointsBy.TOPLEFT[2] == mover("chat") and env.ChatFrame1._pointsBy.BOTTOMRIGHT[2] == mover("chat"),
+      "the window is fastened to both corners of its box, so it is the box's size")
+    assert(ns.Overhaul.needsReload == false, "sizes change at once, without a reload")
+    S.chat.width = 5000
+    ns.Overhaul.Changed("chat.width")
+    assert(mover("chat")._size[1] == 900, "a width outside the limits is brought inside them")
+    S.chat.width, S.chat.height = 400, 180
+    ns.Overhaul.Changed("chat.width")
+    -- text size: one step up from what the game had, on every chat window and the edit box
+    step("chat.fontSize", 1)
+    assert(S.chat.fontSize == 15, "the first step starts from the size in use: " .. tostring(S.chat.fontSize))
+    assert(env.ChatFrame1._font[1] == ARIAL and env.ChatFrame1._font[2] == 15 and env.ChatFrame2._font[2] == 15, "every chat window takes the size, keeping its font")
+    assert(CHAT_SIZES[env.ChatFrame1] == 15 and CHAT_SIZES[env.ChatFrame2] == 15, "set the game's own way too, so the game remembers it")
+    assert(env.ChatFrame1EditBox._font[2] == 15 and CHAT_SIZES[env.ChatFrame1EditBox] == nil, "the edit box takes the size as well")
+    assert(sui.steppers["chat.fontSize"].text:GetText() == "Text size: 15", "and the page says so")
+    S.chat.fontSize = 24
+    step("chat.fontSize", 1)
+    assert(S.chat.fontSize == 24 and env.ChatFrame1._font[2] == 24, "the + button stops at the most")
+    assert(ns.Chat.EDIT_H == 32 and ns.Chat.EDIT_ROOM == 40 and bd._pointsBy.BOTTOMRIGHT[5] == -40, "the edit box grows with the text, and the backdrop still takes it in")
+    -- the game puts its remembered size back: the look once a second sets ours again
+    rawset(env.ChatFrame1, "_font", { ARIAL, 12, "" })
+    assert(C.Check() == false and env.ChatFrame1._font[2] == 24, "a size the game put back is set again")
+    -- font: the same list as the unit frames; back to the game's own gives the window its file back
+    click("MintCommunityToolsSettingChatFont")
+    assert(S.chat.font == "friz" and env.ChatFrame1._font[1] == FRIZ and env.ChatFrame1._font[2] == 24 and sui.chatFont:GetText() == "Font: Friz Quadrata", "the font button steps to the next font")
+    S.chat.font = "default"
+    ns.Overhaul.Changed("chat.font")
+    assert(env.ChatFrame1._font[1] == ARIAL and sui.chatFont:GetText() == "Font: as the game has it", "back to the game's own font: the window's own file again")
+    S.chat.fontSize = 14
+    ns.Overhaul.Changed("chat.fontSize")
+    assert(env.ChatFrame1._font[2] == 14 and ns.Chat.EDIT_ROOM == 30, "and a size of 14 again")
   end
 
   -- The quest tracker: the addon's own list of what the game says is tracked.
@@ -1555,6 +1747,69 @@ if S.enabled then
     assert(env.ObjectiveTrackerFrame._parent == hider, "hidden again when the game's layout arrives")
   end
 
+  -- A frame under the hidden parent may ask that parent to do something only its real parent
+  -- could: the hidden parent answers any method by doing nothing, and still has no fields.
+  assert(hider._shown == false and hider:GetName() == "MintCommunityToolsHider", "the hidden parent keeps its own methods")
+  assert(type(hider.UpdateBarsShown) == "function" and hider:UpdateBarsShown() == nil and select("#", hider:AnythingAtAll(1, 2)) == 0,
+    "and answers a method it does not have by doing nothing")
+  assert(hider.isManagedFrame == nil and hider.layoutParent == nil and hider[1] == nil, "a field the game looks for is still not there")
+
+  -- The game's experience bar holders stay with their manager: the game's own edit mode has
+  -- each ask its parent what to show, and a parent that is not the manager is a Lua error.
+  assert(env.StatusTrackingBarManager._parent == hider, "the manager is hidden")
+  assert(rawget(env.MainStatusTrackingBarContainer, "_parent") == nil and rawget(env.SecondaryStatusTrackingBarContainer, "_parent") == nil,
+    "its two holders are left under it")
+
+  -- The game menu's Edit Mode button opens this UI's edit mode: a transparent button of the
+  -- addon's lies over it, and steps aside while Shift is held, for the game's own.
+  do
+    local O = ns.Overhaul
+    assert(not pcall(frameNamed, "MintCommunityToolsMenuEditCatch"), "nothing is made until the menu opens")
+    MENU.SHOWN = true
+    MENU.frame._hooks.OnShow(MENU.frame)
+    local catch = frameNamed("MintCommunityToolsMenuEditCatch")
+    assert(catch._shown and catch._pointsBy.TOPLEFT[2] == MENU.edit and catch._pointsBy.BOTTOMRIGHT[2] == MENU.edit, "the catch lies exactly over the Edit Mode button")
+    assert(rawget(catch, "_parent") == nil and catch._mouse == true, "it is not a child of the game's menu, and takes the mouse")
+    assert(rawget(MENU.edit, "_scripts").OnClick == nil, "the game's own button is not given a script")
+    catch._scripts.OnClick(catch, "LeftButton")
+    assert(O.Editing() and PANELS_HIDDEN[#PANELS_HIDDEN] == MENU.frame, "a click closes the menu and opens this UI's edit mode")
+    O.SetEdit(false)
+    -- Shift held: the catch lets the mouse through to the game's button
+    SHIFT = true
+    catch._scripts.OnUpdate(catch, 0.02)
+    assert(catch._mouse == false, "with Shift held the click goes to the game's own button")
+    SHIFT = false
+    catch._scripts.OnUpdate(catch, 0.02)
+    assert(catch._mouse == true, "and comes back when Shift is let go")
+    -- in combat: the menu closes and the edit mode says why it will not open
+    env.InCombatLockdown = function() return true end
+    catch._scripts.OnClick(catch, "LeftButton")
+    assert(not O.Editing() and out.prints[#out.prints]:find("cannot be used in combat", 1, true), "in combat it says so")
+    env.InCombatLockdown = function() return false end
+    -- the menu closes: the catch goes with it
+    MENU.SHOWN = false
+    MENU.frame._hooks.OnHide(MENU.frame)
+    assert(catch._shown == false, "the catch is put away when the menu closes")
+    -- the setting off: the game's button is left to itself
+    MENU.SHOWN = true
+    local box = ns.settingsui.checks["menuEdit"]
+    rawset(box, "_checked", false)
+    box._scripts.OnClick(box)
+    assert(S.menuEdit == false and catch._shown == false and O.needsReload == false, "switched off, at once, without a reload")
+    MENU.frame._hooks.OnShow(MENU.frame)
+    assert(catch._shown == false, "and it stays off when the menu opens")
+    rawset(box, "_checked", true)
+    box._scripts.OnClick(box)
+    assert(catch._shown, "switched on again while the menu is open: back over the button")
+    -- a menu without an Edit Mode button: nothing to lie over
+    rawset(MENU.edit, "GetText", function() return "Something else" end)
+    MENU.frame._hooks.OnShow(MENU.frame)
+    assert(catch._shown == false, "no Edit Mode button, no catch")
+    rawset(MENU.edit, "GetText", function() return "Edit Mode" end)
+    MENU.SHOWN = false
+    MENU.frame._hooks.OnHide(MENU.frame)
+  end
+
   -- The game menu and the windows it opens: the art gone, flat panels and buttons in its place.
   do
     local M = ns.Menus
@@ -1566,7 +1821,7 @@ if S.enabled then
     assert(rawget(MENU.headerText, "_alpha") == nil, "its title is not")
     local d = M.dressed[MENU.frame]
     assert(d and #d.edges == 4 and d.bg._colorTexture[4] > 0 and black(d.edges[1]), "a flat background and four black edges on the menu")
-    assert(M.windows.GameMenuFrame.art == 3 and M.windows.GameMenuFrame.buttons == 2, "counted: " .. M.windows.GameMenuFrame.art .. " art, " .. M.windows.GameMenuFrame.buttons .. " buttons")
+    assert(M.windows.GameMenuFrame.art == 3 and M.windows.GameMenuFrame.buttons == 3, "counted: " .. M.windows.GameMenuFrame.art .. " art, " .. M.windows.GameMenuFrame.buttons .. " buttons")
     -- its buttons, whatever their art is kept in: flat, the border lit under the mouse
     assert(M.dressed[MENU.options] and M.dressed[MENU.plain] and MENU.optionsArt._alpha == 0 and MENU.plainArt._alpha == 0, "the menu's buttons are flat")
     MENU.options._hooks.OnEnter(MENU.options)
@@ -1624,6 +1879,94 @@ if S.enabled then
     assert(M.windows.MacroFrame and macroArt._alpha == 0 and M.dressed[macro] and M.count == 4, "a window that loads later is dressed then")
     assert(ns.settingsui.checks["menus.enabled"], "the game menu has its switch on the General page")
     env.MacroFrame = nil   -- the harness's own, not a global the addon made
+  end
+
+  -- The bag windows: the window flat like the game menu's, each slot a flat square whose
+  -- border is the colour of the item's quality.
+  do
+    local M, B, BAG = ns.Menus, ns.Bags, MENU.bag
+    local function edge(b) local c = M.dressed[b].edges[1]._colorTexture; return math.floor(c[1] * 100 + 0.5) .. "," .. math.floor(c[2] * 100 + 0.5) .. "," .. math.floor(c[3] * 100 + 0.5) end
+    assert(ns.Overhaul.applied.bags and B.count == 1 and M.windows.ContainerFrameCombinedBags, "the bag windows are a piece of the overhaul; the one that exists is dressed")
+    assert(M.dressed[BAG.frame] and BAG.nineArt._alpha == 0 and BAG.portrait._alpha == 0, "the window: its border and the bag's portrait gone, a flat panel")
+    assert(M.dressed[BAG.close].mark:GetText() == "x" and BAG.closeArt._alpha == 0, "its close button a flat square with an x")
+    -- slots
+    assert(M.dressed[BAG.epic] and BAG.epicSlot._alpha == 0 and BAG.epicBorder._alpha == 0, "a slot: the empty-slot art and the game's coloured frame are invisible")
+    assert(BAG.epicIcon._texCoord[1] == 0.08 and BAG.epicIcon._alpha == 1, "the item's picture is trimmed, and shows")
+    -- an empty slot's picture is the game's empty-slot art: invisible, and not trimmed (it is
+    -- an atlas: trimming would cut a piece out of the sheet it is on)
+    assert(BAG.emptyIcon._alpha == 0 and rawget(BAG.emptyIcon, "_texCoord") == nil, "an empty slot is the plain square: its slot art is invisible")
+    BAG.emptyIcon:SetTexture(134414)
+    assert(BAG.emptyIcon._alpha == 1 and BAG.emptyIcon._texCoord[1] == 0.08, "an item arrives: its picture shows, trimmed")
+    BAG.emptyIcon:SetAtlas("bags-item-slot64")
+    assert(BAG.emptyIcon._alpha == 0, "it goes: the slot art is invisible again")
+    -- the bag's menu, where the portrait was, and the sort button
+    assert(M.dressed[BAG.menu] and M.dressed[BAG.menu].inset == 10 and M.dressed[BAG.menu].mark:GetText() == "v" and BAG.menuArt._alpha == 0,
+      "the menu behind the portrait is a small flat square with a v")
+    assert(M.dressed[BAG.sort] and M.dressed[BAG.sort].mark:GetText() == "Sort" and BAG.sortArt._alpha == 0, "the sort button is a flat square that says Sort")
+    assert(edge(BAG.epic) == "64,21,93", "the slot's border is the colour of the item's quality: " .. edge(BAG.epic))
+    assert(edge(BAG.empty) == "0,0,0", "an empty slot's border is plain")
+    -- the game shows and colours the frame when an item arrives, hides it when it goes
+    BAG.emptyBorder:Show()
+    BAG.emptyBorder:SetVertexColor(0.1, 0.5, 1)
+    assert(edge(BAG.empty) == "10,50,100", "an item arrives: the border takes its quality's colour")
+    BAG.emptyBorder:Hide()
+    assert(edge(BAG.empty) == "0,0,0", "it goes: plain again")
+    -- the coin box and the search box
+    assert(M.dressed[BAG.money] and BAG.coinArt._alpha == 0 and M.dressed[BAG.search] and BAG.searchArt._alpha == 0, "the coin box and the search box are flat")
+    assert(rawget(BAG.epic, "_point") == nil and rawget(BAG.epic, "_size") == nil and rawget(BAG.epic, "_parent") == nil, "the slots are not moved, resized or reparented")
+    -- a slot made later is dressed when the game lays the bag's items out
+    local late = BAG.slot({ 0, 0.44, 0.87 })
+    BAG.children[#BAG.children + 1] = late
+    BAG.frame:UpdateItems()
+    assert(M.dressed[late] and edge(late) == "0,44,87", "a slot made later is dressed when the items are laid out")
+    -- the bags change while the window is open: once, a moment later; a closed window is left
+    local later = BAG.slot(nil)
+    BAG.children[#BAG.children + 1] = later
+    BAG.SHOWN = true
+    fire("BAG_UPDATE_DELAYED"); fire("BAG_UPDATE_DELAYED")
+    assert(not M.dressed[later], "not at once")
+    B.events._scripts.OnUpdate(B.events, 0.06)
+    assert(not M.dressed[later], "nor before a tenth of a second")
+    B.events._scripts.OnUpdate(B.events, 0.06)
+    assert(M.dressed[later] and B.dirty == false, "then the open window is looked over again")
+    local unseen = BAG.slot(nil)
+    BAG.children[#BAG.children + 1] = unseen
+    BAG.SHOWN = false
+    fire("BAG_UPDATE_DELAYED")
+    B.events._scripts.OnUpdate(B.events, 0.2)
+    assert(not M.dressed[unseen] and B.Refresh() == 0, "a closed bag window is left until it opens")
+    BAG.frame._hooks.OnShow(BAG.frame)
+    assert(M.dressed[unseen], "and dressed when it does")
+    assert(ns.settingsui.checks["bags.enabled"], "the bag windows have their switch on the Action bars page")
+
+    -- The bag window has a box of its own in edit mode, and sits on it by its bottom right corner.
+    local box = mover("bagwindow")
+    local function onBox() local p = BAG.frame._point; return p[1] == "BOTTOMRIGHT" and p[2] == box and p[3] == "BOTTOMRIGHT" end
+    assert(box.label == "Bag window" and box._pointsBy.BOTTOMRIGHT[4] == -20 and box._pointsBy.BOTTOMRIGHT[5] == 84, "a Bag window box, bottom right by default")
+    BAG.SHOWN = true
+    BAG.frame._hooks.OnShow(BAG.frame)
+    assert(onBox() and box._size[1] == 430 and box._size[2] == 179, "an open bag window sits on its box, and the box is the window's size")
+    -- the game places its bag windows each time one opens or closes: the window goes back after
+    env.UpdateContainerFrameAnchors()
+    assert(onBox(), "the game placed the window: it is put back on its box at once")
+    -- anything else that moves it is caught within a second
+    BAG.frame:SetPoint("TOPLEFT", env.UIParent, "TOPLEFT", 5, -5)
+    B.sinceCheck = 0
+    B.events._scripts.OnUpdate(B.events, 0.5)
+    assert(not onBox(), "not before a second has passed")
+    B.events._scripts.OnUpdate(B.events, 0.6)
+    assert(onBox(), "then it is back on its box")
+    -- not in combat: the game does not let a window holding its item buttons be moved then
+    env.InCombatLockdown = function() return true end
+    env.UpdateContainerFrameAnchors()
+    assert(not onBox() and B.pending == true, "in combat the window stays where the game put it")
+    env.InCombatLockdown = function() return false end
+    fire("PLAYER_REGEN_ENABLED")
+    assert(onBox() and B.pending == nil, "and goes to its box when combat ends")
+    -- a closed bag window is not touched
+    BAG.SHOWN = false
+    BAG.frame:SetPoint("TOPLEFT", env.UIParent, "TOPLEFT", 5, -5)
+    assert(B.Check() == false and B.Place() == false and not onBox(), "a closed bag window is left where it is")
   end
 
   -- Edit mode: the movers show, drag, remember, and reset.
@@ -1684,6 +2027,9 @@ if S.enabled then
 else
   assert(rawget(MENU.borderArt, "_alpha") == nil and ns.Menus.dressed[MENU.frame] == nil and ns.Overhaul.applied.menus == nil,
     "with the overhaul off the game menu is not touched")
+  assert(rawget(MENU.frame, "_hooks") == nil and not pcall(frameNamed, "MintCommunityToolsMenuEditCatch") and ns.Overhaul.PlaceMenuCatch() == false,
+    "nor is its Edit Mode button caught")
+  assert(ns.Menus.dressed[MENU.bag.frame] == nil and ns.Menus.dressed[MENU.bag.epic] == nil and rawget(MENU.bag.epicSlot, "_alpha") == nil, "nor are the bag windows")
   ov.playerUntouched = rawget(env.PlayerFrame, "_parent") == nil and rawget(env.ActionButton1, "_point") == nil and rawget(env.Minimap, "_mask") == nil
   ov.noFrames = not pcall(frameNamed, "MintCommunityToolsPlayerFrame")
   slash("edit")
@@ -1713,6 +2059,37 @@ do
 end
 if VARIANT == "forever" then
   assert(ns.Quests.Source() == nil and #ns.Quests.List() == 0, "a client with no quest list the addon can read: nothing, and no error")
+end
+
+-- Nothing on the Settings pages may run past the window's sides (470 wide, 8 of padding).
+do
+  local sui = ns.settingsui
+  local INNER = 470 - 2 * 8
+  local n = 0
+  for path, cb in pairs(sui.checks) do
+    n = n + 1
+    local left = cb._pointsBy.TOPLEFT[2]   -- the box's x within its page
+    assert(type(cb.room) == "number" and cb.label._width == cb.room, path .. ": its label has a width")
+    assert(left + 14 + 4 + cb.room <= 8 + INNER, path .. ": box and label end inside the window: " .. (left + 18 + cb.room))
+    assert(cb.label._pointsBy.TOPLEFT[2] == cb, path .. ": the label hangs from the box's top, so further lines go down")
+  end
+  assert(n >= 25, "every check box was looked at: " .. n)
+  -- a long label wraps, and its row grows so the next row starts under it
+  local function top(path) return sui.checks[path]._pointsBy.TOPLEFT[3] end
+  assert(sui.checks["menus.enabled"].label._wrap == true and top("menus.enabled") - top("menuEdit") == 30, "a label of two lines takes a taller row: " .. (top("menus.enabled") - top("menuEdit")))
+  assert(top("units.portrait") - top("units.portrait3d") == 18, "a label of one line keeps the usual row")
+  -- two boxes on one row: each label has its column and is cut short rather than wrapped
+  local a, b = sui.checks["units.buffTimers"], sui.checks["units.debuffTimers"]
+  assert(a.label._wrap == false and b.label._wrap == false and a._pointsBy.TOPLEFT[2] + 18 + a.room <= b._pointsBy.TOPLEFT[2], "the first of two on a row stops before the second")
+  -- the text beside a stepper has what is left of its column
+  for path, st in pairs(sui.steppers) do
+    assert(st.text._width == st.room and st.text._wrap == false and st.room > 100 and st.room <= 230, path .. ": the stepper's text is kept to its column: " .. tostring(st.room))
+  end
+  -- text on a button stays inside the button, however long a font's name is
+  for _, button in ipairs({ sui.font, sui.chatFont, sui.buttonShape, sui.cycles["units.player.buffs"] }) do
+    local fs = button:GetFontString()
+    assert(type(fs._width) == "number" and fs._width <= 190 - 8 and fs._wrap == false, "a button's text is kept inside it")
+  end
 end
 
 -- The Settings tab's own switches for the minimap button: shown or not, and its shape.
@@ -1747,6 +2124,9 @@ do
   assert(bags.buttons.CharacterReagentBag0Slot.id == 35 and bags.buttons.CharacterReagentBag0Slot.item == "nil", "the reagent slot's slot, and that it is empty")
   assert(S.enabled ~= true or bags.clicks.KeyRingButton.count == 2, "and what clicks on them did")
 end
+slash("uidump bags")
+assert(env.MintCommunityToolsDB.uiDump.group == "bags" and env.MintCommunityToolsDB.uiDump.frames.ContainerFrameCombinedBags and env.MintCommunityToolsDB.uiDump.frames.GameMenuFrame == nil,
+  "/mint uidump bags records the bag windows, and only those")
 slash("uidump menus")
 do
   local menus = env.MintCommunityToolsDB.uiDump

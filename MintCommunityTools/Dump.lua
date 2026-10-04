@@ -15,6 +15,7 @@
     /mint uidump records the frames on screen during play (bars, unit frames, chat, minimap,
     quest tracker). /mint uidump menus records the game menu and the windows it opens
     instead: open the game menu and each of those windows once first, so that they exist.
+    /mint uidump bags records the bag windows: have your bags open when you type it.
 ]]
 
 local ADDON, ns = ...
@@ -54,7 +55,13 @@ local MENU_ROOTS = {
     { "MacroFrame", 3 }, { "HelpFrame", 2 }, { "KeyBindingFrame", 2 }, { "InterfaceOptionsFrame", 2 },
     { "VideoOptionsFrame", 2 }, { "StaticPopup1", 2 }, { "GameTooltip", 1 }, { "DropDownList1", 1 },
 }
-local GROUPS = { menus = MENU_ROOTS }
+-- /mint uidump bags: the bag windows (open your bags first) and what sits in them.
+local BAG_ROOTS = {
+    { "ContainerFrameCombinedBags", 3 }, { "ContainerFrame1", 3 }, { "ContainerFrame2", 2 }, { "ContainerFrame6", 2 },
+    { "BagItemSearchBox", 1 }, { "BagItemAutoSortButton", 1 }, { "BackpackTokenFrame", 2 }, { "ContainerFrame1MoneyFrame", 1 },
+    { "BankFrame", 2 }, { "MerchantFrame", 1 },
+}
+local GROUPS = { menus = MENU_ROOTS, bags = BAG_ROOTS }
 
 -- Functions and tables the overhaul would like to use.
 local APIS = {

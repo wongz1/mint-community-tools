@@ -74,10 +74,12 @@ local ART_FRAMES = { "MainMenuBarArtFrame", "MainMenuBar", "MainActionBar", "Mic
 -- Parts of the main bar that newer clients keep as fields rather than under global names.
 local ART_FIELDS = { "EndCaps", "BorderArt", "Background", "ArtFrame", "ActionBarPageNumber" }
 -- The game's own experience and reputation bars, by every name they have had.
-local STATUS_BARS = {
-    "MainMenuExpBar", "ReputationWatchBar", "MainMenuBarMaxLevelBar", "StatusTrackingBarManager",
-    "MainStatusTrackingBarContainer", "SecondaryStatusTrackingBarContainer",
-}
+local STATUS_BARS = { "MainMenuExpBar", "ReputationWatchBar", "MainMenuBarMaxLevelBar", "StatusTrackingBarManager" }
+-- A newer client's two bar holders. They are NOT taken from their manager: when the game's
+-- own edit mode opens, each asks its parent (the manager) to work out what to show, and a
+-- parent that cannot answer is a Lua error that stops the edit mode from opening. Hiding
+-- the manager hides them with it; they are only hidden on their own where there is none.
+local STATUS_CONTAINERS = { "MainStatusTrackingBarContainer", "SecondaryStatusTrackingBarContainer" }
 
 local function settings()
     return ns.Overhaul.Settings().bars
@@ -587,6 +589,12 @@ local function buildExperience()
     local W = ns.W
     -- The game's own bars go, whatever this client calls them.
     for _, name in ipairs(STATUS_BARS) do ns.Overhaul.HideBlizzard(frame(name)) end
+    if not frame("StatusTrackingBarManager") then
+        for _, name in ipairs(STATUS_CONTAINERS) do
+            local f = frame(name)
+            if f then pcall(f.SetAlpha, f, 0) end
+        end
+    end
 
     local s = settings()
     local width = 12 * (s.size + s.spacing) - s.spacing

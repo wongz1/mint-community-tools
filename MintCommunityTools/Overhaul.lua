@@ -8,6 +8,7 @@
       Map.lua          a square minimap with coordinates and the time under it
       Quests.lua       the tracked quests and their objectives, as a plain list
       Menus.lua        the game menu (Escape) and the windows it opens
+      Bags.lua         the bag windows
     Each piece can be turned off on its own, and the whole overhaul can (Settings tab,
     /mint ui on|off). Off is the default until it has been tried on the real client.
 
@@ -15,6 +16,12 @@
     is anchored to. Edit mode (/mint edit, or the Settings tab) shows the movers as labelled
     boxes to drag; right-click one to put it back. Positions are kept in the saved variables
     (ui.positions) by mover name.
+
+    The game menu's own Edit Mode button opens this edit mode while the overhaul is on (the
+    game's edit mode moves frames the overhaul has replaced); hold Shift while clicking it
+    for the game's own. That is done with a transparent button of the addon's laid over the
+    game's, which steps aside while Shift is held: the game's button and what it runs are
+    not touched.
 
     What the game's own frames look like can only be changed once per session: turning a
     piece off (or the overhaul) takes a /reload to undo. The Settings tab says so and offers
@@ -30,8 +37,10 @@ local pairs, ipairs, type, tostring, pcall = pairs, ipairs, type, tostring, pcal
 
 O.DEFAULTS = {
     enabled = false,
+    menuEdit = true,     -- the game menu's Edit Mode button opens this UI's edit mode
     bars = { enabled = true, size = 32, spacing = 2, hideMicro = false, extraBags = true },
-    chat = { enabled = true, background = true, width = 400, height = 180 },
+    -- fontSize 0 and font "default" mean: as the game has them
+    chat = { enabled = true, background = true, width = 400, height = 180, fontSize = 0, font = "default" },
     units = {
         enabled = true, portrait = true, portrait3d = false, classColor = true,
         font = "default", fontSize = 10, width = 240, height = 46, smallWidth = 120, smallHeight = 24,
@@ -42,6 +51,7 @@ O.DEFAULTS = {
     map = { enabled = true, square = true, size = 180, zone = true, coords = true, localTime = true, gameTime = true },
     quests = { enabled = true, levels = true, background = false, collapsed = false, width = 250, maxHeight = 420 },
     menus = { enabled = true },
+    bags = { enabled = true },
     positions = {},
 }
 
@@ -92,6 +102,22 @@ local function inCombat()
     return InCombatLockdown and InCombatLockdown() or false
 end
 
+-- Is the game's own edit mode open? It is moving its frames about then, and the pieces that
+-- keep a frame of the game's on a mover leave it alone until it closes.
+function O.GameEditing()
+    local manager = _G.EditModeManagerFrame
+    if type(manager) ~= "table" then return false end
+    if type(manager.IsEditModeActive) == "function" then
+        local ok, active = pcall(manager.IsEditModeActive, manager)
+        if ok and active == true then return true end
+    end
+    if type(manager.IsShown) == "function" then
+        local ok, shown = pcall(manager.IsShown, manager)
+        if ok and shown == true then return true end
+    end
+    return false
+end
+
 ---------------------------------------------------------------------------
 -- Hiding the game's own frames
 ---------------------------------------------------------------------------
@@ -100,6 +126,26 @@ end
 local hider = CreateFrame("Frame", "MintCommunityToolsHider", UIParent)
 hider:Hide()
 O.hider = hider
+
+-- Some of the game's frames ask their parent to do things ("parent:UpdateBarsShown()"), and
+-- a frame moved under the hider would be asking the hider, which has no such method: a Lua
+-- error in the game's own code. So the hider answers any method it does not have by doing
+-- nothing. Only names that start with a capital, as methods do: a field the game looks for
+-- ("isManagedFrame") is still not there.
+pcall(function()
+    local mt = getmetatable(hider)
+    local methods = mt and mt.__index
+    if type(methods) ~= "table" then return end
+    local function nothing() end
+    setmetatable(hider, {
+        __index = function(_, key)
+            local v = methods[key]
+            if v ~= nil then return v end
+            if type(key) == "string" and key:find("^%u") then return nothing end
+            return nil
+        end,
+    })
+end)
 
 function O.HideBlizzard(frame)
     if type(frame) ~= "table" then return false end
@@ -283,6 +329,107 @@ function O.ToggleEdit()
 end
 
 ---------------------------------------------------------------------------
+-- The game menu's Edit Mode button
+---------------------------------------------------------------------------
+
+local catch          -- the addon's transparent button over the game's
+local menuHooked = false
+
+-- The game menu's Edit Mode button: the one that says so. The menu makes its buttons anew
+-- each time it opens, so it is looked for each time.
+local function gameEditButton()
+    local menu = _G.GameMenuFrame
+    if type(menu) ~= "table" or type(menu.GetChildren) ~= "function" then return nil end
+    local label = type(HUD_EDIT_MODE_MENU) == "string" and HUD_EDIT_MODE_MENU or "Edit Mode"
+    local ok, children = pcall(function() return { menu:GetChildren() } end)
+    if not ok then return nil end
+    for _, child in ipairs(children) do
+        if type(child) == "table" and type(child.GetText) == "function" and type(child.IsObjectType) == "function" then
+            local okType, isButton = pcall(child.IsObjectType, child, "Button")
+            local okText, text = pcall(child.GetText, child)
+            if okType and isButton == true and okText and text == label then return child end
+        end
+    end
+    return nil
+end
+
+local function buildCatch()
+    local W = ns.W
+    catch = W.safeCreate("Button", "MintCommunityToolsMenuEditCatch", UIParent)
+    catch:RegisterForClicks("LeftButtonUp")
+    catch.over, catch.stepped = false, false
+    catch:SetScript("OnClick", function()
+        local menu = _G.GameMenuFrame
+        if type(HideUIPanel) == "function" then pcall(HideUIPanel, menu) else pcall(menu.Hide, menu) end
+        O.SetEdit(true)
+    end)
+    catch:SetScript("OnEnter", function(self)
+        if type(self.over) == "table" and type(self.over.LockHighlight) == "function" then pcall(self.over.LockHighlight, self.over) end
+        if not GameTooltip then return end
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:SetText("Edit Mode", 1, 0.82, 0)
+        GameTooltip:AddLine("Opens the minimalist UI's edit mode: drag its frames where you want them.", 1, 1, 1, true)
+        GameTooltip:AddLine("Hold Shift and click for the game's own edit mode.", 0.6, 0.6, 0.6, true)
+        GameTooltip:Show()
+    end)
+    catch:SetScript("OnLeave", function(self)
+        if type(self.over) == "table" and type(self.over.UnlockHighlight) == "function" then pcall(self.over.UnlockHighlight, self.over) end
+        if GameTooltip then GameTooltip:Hide() end
+    end)
+    -- While Shift is held the catch lets the mouse through, so the click reaches the game's
+    -- own button and runs the game's own, untouched, code.
+    catch:SetScript("OnUpdate", function(self)
+        local shift = IsShiftKeyDown and IsShiftKeyDown() and true or false
+        if shift ~= self.stepped then
+            self.stepped = shift
+            self:EnableMouse(not shift)
+        end
+    end)
+end
+
+-- Lays the catch over the game menu's Edit Mode button, or puts it away: when the overhaul
+-- or this setting is off, when the menu is closed, or when the menu has no such button.
+function O.PlaceMenuCatch()
+    local menu = _G.GameMenuFrame
+    local wanted = O.Active() and O.Settings().menuEdit and type(menu) == "table"
+    local shown = false
+    if wanted and type(menu.IsShown) == "function" then
+        local ok, s = pcall(menu.IsShown, menu)
+        shown = ok and s == true
+    end
+    local button = wanted and shown and gameEditButton() or nil
+    if not button then
+        if catch then catch:Hide() end
+        return false
+    end
+    if not catch then buildCatch() end
+    catch.over = button
+    catch:ClearAllPoints()
+    catch:SetPoint("TOPLEFT", button, "TOPLEFT", 0, 0)
+    catch:SetPoint("BOTTOMRIGHT", button, "BOTTOMRIGHT", 0, 0)
+    local okStrata, strata = pcall(menu.GetFrameStrata, menu)
+    if okStrata and type(strata) == "string" then catch:SetFrameStrata(strata) end
+    local okLevel, level = pcall(button.GetFrameLevel, button)
+    catch:SetFrameLevel((okLevel and type(level) == "number" and level or 10) + 10)
+    catch.stepped = false
+    catch:EnableMouse(true)
+    catch:Show()
+    return true
+end
+
+-- The menu is watched, not changed: its buttons are made when it opens.
+local function hookGameMenu()
+    local menu = _G.GameMenuFrame
+    if menuHooked or type(menu) ~= "table" or type(menu.HookScript) ~= "function" then return end
+    menuHooked = true
+    pcall(menu.HookScript, menu, "OnShow", function() O.PlaceMenuCatch() end)
+    pcall(menu.HookScript, menu, "OnHide", function() O.PlaceMenuCatch() end)
+    if hooksecurefunc and type(menu.InitButtons) == "function" then
+        pcall(hooksecurefunc, menu, "InitButtons", function() O.PlaceMenuCatch() end)
+    end
+end
+
+---------------------------------------------------------------------------
 -- Applying the overhaul
 ---------------------------------------------------------------------------
 
@@ -296,6 +443,7 @@ local PIECES = {
     { key = "map", module = "Map", label = "minimap" },
     { key = "quests", module = "Quests", label = "quest tracker" },
     { key = "menus", module = "Menus", label = "game menu" },
+    { key = "bags", module = "Bags", label = "bag windows" },
 }
 O.PIECES = PIECES
 
@@ -322,6 +470,7 @@ function O.Apply()
     for _, piece in ipairs(PIECES) do
         if O.Active(piece.key) and not O.applied[piece.key] then applyPiece(piece) end
     end
+    hookGameMenu()
 end
 
 -- Called when combat ends: a login that happened in combat is set up now, and each piece is
@@ -359,6 +508,7 @@ function O.Changed(path)
         if O.applied[piece.key] and m and m.OnSettingsChanged then pcall(m.OnSettingsChanged, path) end
     end
     if not s.enabled and editing then O.SetEdit(false) end
+    if path == "menuEdit" or path == "enabled" then O.PlaceMenuCatch() end
 end
 
 -- /mint ui [on|off]

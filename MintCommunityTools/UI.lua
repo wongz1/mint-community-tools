@@ -245,6 +245,28 @@ function W.button(parent, name, text, width, onClick)
 end
 local button = W.button
 
+-- Keeps a button's text inside the button: one line, cut short with dots when it is longer
+-- than the button is wide (a font's name can be any length).
+function W.fitText(b, width)
+    local fs = type(b.GetFontString) == "function" and b:GetFontString()
+    if type(fs) ~= "table" then return false end
+    if type(width) ~= "number" then width = type(b.GetWidth) == "function" and b:GetWidth() end
+    if type(width) ~= "number" or width <= 12 then return false end
+    fs:SetWidth(width - 8)
+    if fs.SetWordWrap then fs:SetWordWrap(false) end
+    return true
+end
+
+-- How tall a font string is once its text is wrapped to `width`. The game says, once the
+-- string has its width; where it does not (it gives nothing, or less than a line), the
+-- height is worked out from the length of the text.
+function W.textHeight(fs, text, width)
+    local h = type(fs.GetStringHeight) == "function" and fs:GetStringHeight()
+    if type(h) == "number" and h >= 9 then return h end
+    local lines = math.max(1, math.ceil(#tostring(text or "") * 5.6 / width))
+    return lines * 12
+end
+
 -- Marks a button as the selected one of a set (a tab): accent border, hover background,
 -- and no hover or press effects until it is unselected.
 function W.setSelected(b, selected)

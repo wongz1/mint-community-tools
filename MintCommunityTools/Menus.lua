@@ -13,7 +13,11 @@
       - drop-downs and search boxes are flat panels; sliders are a thin bar with a flat
         thumb; scroll bars a thin dark track with a flat thumb;
       - framed areas inside a window (insets, text boxes) lose their frame art for a 1px
-        border; the options window's category headings lose their banners.
+        border; the options window's category headings lose their banners;
+      - item slots (in the bag windows, which Bags.lua dresses with the same code) are
+        flat dark squares, the item's picture trimmed to them, with the border in the colour
+        of the item's quality where the game drew a coloured frame; a coin box loses its
+        frame.
 
     How: a window's art is made invisible (alpha 0; the game sets the pictures again when a
     button is pressed, but not their alpha), and a background and four 1px edges are drawn
@@ -272,6 +276,18 @@ local function mark(b, text, point, x)
     d.mark = fs
 end
 
+-- A small button of the game's whose art is a picture rather than a frame (a bag's sort
+-- button, the menu behind a window's portrait): its art gone, a flat square with a word or a
+-- letter on it, `inset` in from the button's sides when the button is larger than it looks.
+function Menus.FlatMarked(b, text, inset)
+    if not isType(b, "Button") then return false end
+    sweep(b)
+    if not flat(b, ns.W.COLOR.panel, inset) then return false end
+    mark(b, text, "CENTER", 0)
+    hoverHooks(b)
+    return true
+end
+
 -- A close button: a flat square with an x. One that says "Close" keeps its word.
 local function flatClose(b)
     if not isType(b, "Button") then return false end
@@ -398,6 +414,85 @@ local function flatPanel(f)
     return flat(f, NESTED) ~= nil
 end
 
+-- An item slot: a button with a picture (icon) and the frame the game colours by the item's
+-- quality (IconBorder). The slot's art goes for a flat dark square; the picture is trimmed of
+-- its own rounded edge; and the quality's colour, which the game puts on IconBorder, goes on
+-- the square's border instead: IconBorder is kept invisible, and watched.
+--
+-- An empty slot has a picture too: the game shows its empty-slot art through the icon (an
+-- atlas with "slot" in its name) and puts the item's own picture there when one arrives. So
+-- the icon is watched as well: invisible while it shows slot art, shown and trimmed while it
+-- shows an item. It is not trimmed while it shows an atlas: that would cut a piece out of the
+-- sheet the atlas is on.
+local SLOT = { 0.03, 0.03, 0.03, 0.9 }
+
+local function isItemButton(b)
+    return isType(b, "Button") and type(b.IconBorder) == "table" and (type(b.icon) == "table" or type(b.Icon) == "table")
+end
+
+local function flatItemButton(b)
+    hide(part(b, "GetNormalTexture"))
+    for _, key in ipairs({ "NormalTexture", "ItemSlotBackground" }) do
+        if type(b[key]) == "table" then hide(b[key]) end
+    end
+    local icon = type(b.icon) == "table" and b.icon or b.Icon
+    local function picture()
+        local atlas = atlasOf(icon)
+        if atlas and atlas:lower():find("slot", 1, true) then
+            hide(icon)
+        else
+            if type(icon.SetAlpha) == "function" then pcall(icon.SetAlpha, icon, 1) end
+            if type(icon.SetTexCoord) == "function" then pcall(icon.SetTexCoord, icon, 0.08, 0.92, 0.08, 0.92) end
+        end
+    end
+    local first = not dressed[b]
+    local d = flat(b, SLOT)
+    if not d then return false end
+    if first and hooksecurefunc then
+        for _, method in ipairs({ "SetAtlas", "SetTexture" }) do
+            if type(icon[method]) == "function" then pcall(hooksecurefunc, icon, method, picture) end
+        end
+    end
+    picture()
+    local border = b.IconBorder
+    local function plain()
+        local c = ns.W.COLOR.border
+        setEdges(d, c[1], c[2], c[3], c[4])
+    end
+    -- The border as the game has it now: its colour when it is showing, plain when it is not.
+    local function follow()
+        local okShown, shown = pcall(border.IsShown, border)
+        if okShown and shown == true and type(border.GetVertexColor) == "function" then
+            local ok, r, g, bl = pcall(border.GetVertexColor, border)
+            if ok and type(r) == "number" and type(g) == "number" and type(bl) == "number" then
+                setEdges(d, r, g, bl, 1)
+                return
+            end
+        end
+        plain()
+    end
+    if first and hooksecurefunc then
+        if type(border.SetVertexColor) == "function" then
+            pcall(hooksecurefunc, border, "SetVertexColor", function(_, r, g, bl)
+                if type(r) == "number" and type(g) == "number" and type(bl) == "number" then setEdges(d, r, g, bl, 1) end
+            end)
+        end
+        if type(border.Hide) == "function" then pcall(hooksecurefunc, border, "Hide", plain) end
+        if type(border.Show) == "function" then pcall(hooksecurefunc, border, "Show", follow) end
+        if type(border.SetShown) == "function" then pcall(hooksecurefunc, border, "SetShown", follow) end
+    end
+    hide(border)
+    follow()
+    return true
+end
+
+-- A coin box, or any small frame whose frame art is kept in a Border part of three pieces.
+local function isBoxed(f)
+    local border = f.Border
+    if type(border) ~= "table" then return false end
+    return isType(border.Left, "Texture") or isType(border.Middle, "Texture") or isType(border.Right, "Texture")
+end
+
 -- The options window's category list: a heading is a frame with a banner (Background) behind
 -- its Label; an entry is a button whose bar (Texture) shows when it is open or under the mouse.
 local function isListHeading(f)
@@ -455,6 +550,8 @@ dressInside = function(f, depth, budget)
             elseif isFramedEdit(child) then
                 if flatEdit(child) then n = n + 1 end
                 deeper = true
+            elseif isItemButton(child) then
+                if flatItemButton(child) then n = n + 1 end
             elseif isPushButton(child) then
                 if flatButton(child) then n = n + 1 end
             elseif isDropdown(child) then
@@ -471,6 +568,9 @@ dressInside = function(f, depth, budget)
             else
                 if isNineSlice(child) then
                     if flatPanel(child) then n = n + 1 end
+                elseif isBoxed(child) then
+                    clearPart(child.Border)
+                    if flat(child, NESTED) then n = n + 1 end
                 end
                 if type(child.ScrollTarget) == "table" then watchScrollBox(child) end
                 deeper = true
@@ -548,6 +648,13 @@ function Menus.Dress(f, name)
         skip[named] = true
         if flatClose(named) then result.buttons = result.buttons + 1 end
     end
+    -- The portrait is gone, and with it what showed there was a menu behind it: the button
+    -- that opens that menu is drawn as a small flat square with a v.
+    local portrait = type(f.PortraitButton) == "table" and f.PortraitButton or (name and frame(name .. "PortraitButton"))
+    if portrait and not skip[portrait] then
+        skip[portrait] = true
+        if Menus.FlatMarked(portrait, "v", 10) then result.buttons = result.buttons + 1 end
+    end
     if name == "GameMenuFrame" then
         result.buttons = result.buttons + dressGameMenu(f)
     elseif popup then
@@ -558,7 +665,9 @@ function Menus.Dress(f, name)
     return result
 end
 
-local function dressNamed(name)
+-- Dresses the window of that name, and again each time it is shown; `methods` names
+-- methods of the window after which it is dressed again too (a bag lays its items out anew).
+local function dressNamed(name, methods)
     local f = frame(name)
     if not f then return false end
     local ok, result = pcall(Menus.Dress, f, name)
@@ -576,9 +685,15 @@ local function dressNamed(name)
         if name == "GameMenuFrame" and hooksecurefunc and type(f.InitButtons) == "function" then
             pcall(hooksecurefunc, f, "InitButtons", function(self) pcall(Menus.Dress, self, name) end)
         end
+        for _, method in ipairs(methods or {}) do
+            if hooksecurefunc and type(f[method]) == "function" then
+                pcall(hooksecurefunc, f, method, function(self) pcall(Menus.Dress, self, name) end)
+            end
+        end
     end
     return true
 end
+Menus.DressNamed = dressNamed
 
 -- Dresses every window that exists by now. Returns how many there are.
 function Menus.DressAll()

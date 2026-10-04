@@ -1,5 +1,40 @@
 # Changelog
 
+## 0.5.2 - 2026-10-03
+
+Flat bag windows, size and text controls for the chat window, and fixes for Edit Mode. This
+version adds a file, so restart the game once after updating.
+
+**New**
+
+- **Bag windows.** The backpack and bag windows are flat dark panels like the rest of the UI.
+  Each slot is a plain square with the item's picture in it, and its border is the colour of
+  the item's quality; empty slots are plain squares. The search box, the coin box and the
+  sort button are flat too, and the bag's menu is a small **v** button where the portrait
+  was. The bag window has its own **Bag window** box in `/mint edit`, so you can put it where
+  you like; a bag opened in combat moves to its box when combat ends. Its switch is on the
+  **Action bars** page of the Settings tab.
+- **Chat size and text.** The **Chat** page of the Settings tab now sets the chat window's
+  width and height, the size of its text, and its font. The text stays as the game has it
+  until you choose a size or a font there.
+- **The Edit Mode button opens this UI's edit mode.** While the minimalist UI is on, clicking
+  **Edit Mode** in the game menu shows the minimalist UI's frames as boxes to drag, the same
+  as `/mint edit`. Hold **Shift** while clicking it for the game's own edit mode. To have the
+  button always open the game's, untick it on the **General** page of the Settings tab.
+
+**Fixed**
+
+- **Errors when opening Edit Mode.** With the minimalist UI's action bars on, clicking
+  **Edit Mode** in the game menu threw Lua errors and the game's edit mode came up broken.
+  The game's edit mode opens cleanly again.
+- **The chat box moved without the chat window.** In `/mint edit`, dragging the Chat box could
+  leave the chat window behind, because the game had fastened the window somewhere else. The
+  window now stays on its box. A chat window moved in the game's own edit mode, or dragged by
+  its tab, goes back to its box afterwards: move it with `/mint edit`.
+- **Settings text running off the window.** Long labels on the Settings pages ran past the
+  window's side. They now wrap onto a second line, and text on buttons is cut short rather
+  than spilling out.
+
 ## 0.5.1 - 2026-10-03
 
 Mint Community Tools is now on CurseForge. Nothing has changed in game: if you already have
