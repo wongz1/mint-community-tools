@@ -44,7 +44,8 @@ for i = 1, 13 do WINDOWS[#WINDOWS + 1] = "ContainerFrame" .. i end
 Bags.WINDOWS = WINDOWS
 -- The game lays a bag's items out again through these.
 local RELAYS = { "UpdateItems", "UpdateItemLayout", "Update" }
-local EVENTS = { "BAG_UPDATE_DELAYED", "BAG_NEW_ITEMS_UPDATED", "PLAYER_ENTERING_WORLD" }
+local EVENTS = { "BAG_UPDATE_DELAYED", "BAG_NEW_ITEMS_UPDATED", "PLAYER_ENTERING_WORLD", "LOOT_OPENED", "LOOT_READY", "LOOT_SLOT_CLEARED",
+                 "MERCHANT_SHOW", "MERCHANT_UPDATE" }
 
 local MOVER_DEFAULT = { "BOTTOMRIGHT", -20, 84 }
 local MOVER_SIZE = { 430, 180 }   -- until a bag window has been open: about the backpack's own
@@ -122,12 +123,41 @@ local function dressSort()
 end
 
 -- Dresses every bag window that exists. Returns how many there are.
+-- The other windows that hold items are dressed with the bag windows: the loot window (what
+-- a corpse or a chest holds) and the vendor's window. A flat panel, flat buttons and tabs,
+-- items in plain slots with the border in the colour of their quality. Each fills itself
+-- when it opens and as its pages are turned. Built without a look at this client's loot and
+-- vendor windows; /mint uidump loot and /mint uidump vendor record them.
+local LOOT_WINDOWS = { "LootFrame", "MerchantFrame" }
+local LOOT_RELAYS = { LootFrame = { "Open", "Update" }, MerchantFrame = {} }
+-- The vendor's window is filled by functions of the game's that are not the window's own.
+local LOOT_GLOBALS = { "MerchantFrame_Update", "MerchantFrame_UpdateMerchantInfo", "MerchantFrame_UpdateBuybackInfo" }
+Bags.LOOT_WINDOWS = LOOT_WINDOWS
+local lootHooked = {}
+
+local function dressLoot()
+    local n = 0
+    for _, name in ipairs(LOOT_WINDOWS) do
+        if ns.Menus.DressNamed(name, LOOT_RELAYS[name], "bags") then n = n + 1 end
+    end
+    for _, name in ipairs(LOOT_GLOBALS) do
+        if not lootHooked[name] and hooksecurefunc and type(_G[name]) == "function" then
+            lootHooked[name] = true
+            -- dressed again a moment later, with whatever else has changed
+            pcall(hooksecurefunc, name, function() if Bags.applied then Bags.dirty = true end end)
+        end
+    end
+    Bags.lootCount = n
+    return n
+end
+
 function Bags.DressAll()
     local n = 0
     for _, name in ipairs(WINDOWS) do
         if ns.Menus.DressNamed(name, RELAYS, "bags") then n = n + 1 end
     end
     dressSort()
+    dressLoot()
     return n
 end
 
@@ -142,6 +172,15 @@ function Bags.Refresh()
         end
     end
     dressSort()
+    -- the loot and vendor windows, when one is open (and found now, if it did not exist at login)
+    dressLoot()
+    for _, name in ipairs(LOOT_WINDOWS) do
+        local f = frame(name)
+        if f and type(f.IsShown) == "function" then
+            local ok, shown = pcall(f.IsShown, f)
+            if ok and shown == true then pcall(ns.Menus.Dress, f, name, "bags") end
+        end
+    end
     return n
 end
 

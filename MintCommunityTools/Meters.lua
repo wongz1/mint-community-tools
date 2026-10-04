@@ -16,7 +16,9 @@
       - the names and numbers on the bars take the font and the size chosen in the settings;
       - the minimize button and the breakdown window's close button become flat squares.
 
-    The meter also sits on a mover ("Damage meter" in edit mode): the frame the game keeps
+    The meter also sits on a mover ("Damage meter" in edit mode; a right-click on its box
+    opens the game's own box of settings for the meter, the one its Edit Mode shows, and
+    Shift-right-click puts the box back): the frame the game keeps
     its first window on is fastened to the mover's box, where the game had it until the box
     is dragged. The game places that frame itself when its layout arrives; it is put back on
     its box at once, and left alone while the game's own edit mode is open.
@@ -389,13 +391,87 @@ end
 -- The meter on its mover
 ---------------------------------------------------------------------------
 
-local placing = false
-
 -- The frame the game keeps the meter's first window on.
 local function system()
     local f = _G.DamageMeter
     return type(f) == "table" and type(f.GetObjectType) == "function" and f or nil
 end
+
+-- The addon's window on the Settings tab's Meter page.
+function Meter.OpenSettings()
+    if not (ns.UI and ns.UI.Show and ns.SettingsUI and ns.SettingsUI.ShowPage) then return false end
+    ns.UI.Show("settings")
+    return ns.SettingsUI.ShowPage("meter")
+end
+
+-- The game's own box of settings for the meter: the one its Edit Mode shows when the meter
+-- is clicked there (style, numbers, frame width and height, bar height, padding,
+-- transparency, text size, visibility). Opened here without the game's Edit Mode.
+--
+-- This is the one place the addon asks the game's edit mode to do something rather than only
+-- changing how the meter looks, and the game knows an addon asked. Two things are done about
+-- that. It is not opened in combat. And when the box closes, what was changed is saved into
+-- the game's own layout at once: the game then applies that layout to the meter itself, as
+-- its own, in place of the values the addon's request left on it.
+-- Returns true when the box was asked to open.
+function Meter.OpenGameSettings()
+    local dialog, f = _G.EditModeSystemSettingsDialog, system()
+    if not f or type(dialog) ~= "table" or type(dialog.AttachToSystemFrame) ~= "function" then return false end
+    if ns.Overhaul.GameEditing() then return false end   -- the game's edit mode is open: it opens this itself
+    if InCombatLockdown and InCombatLockdown() then
+        ns.Say("the damage meter's settings open when you are out of combat.")
+        return false
+    end
+    if not pcall(dialog.AttachToSystemFrame, dialog, f) then return false end
+    Meter.dialogOpen = true
+    if not hooked[dialog] then
+        hooked[dialog] = true
+        if type(dialog.HookScript) == "function" then
+            pcall(dialog.HookScript, dialog, "OnHide", function()
+                if Meter.dialogOpen then Meter.SaveGameSettings() end
+            end)
+        end
+    end
+    return true
+end
+
+-- The box has closed: what was changed in it is saved into the game's layout. Returns
+-- "saved", "clean" (nothing was changed), "preset" (the game's own two layouts cannot be
+-- changed), "editing" (the game's edit mode is open and saves for itself) or false.
+function Meter.SaveGameSettings()
+    Meter.dialogOpen = false
+    if ns.Overhaul.GameEditing() then return "editing" end
+    local manager = _G.EditModeManagerFrame
+    if type(manager) ~= "table" then return false end
+    if type(manager.HasActiveChanges) == "function" then
+        local ok, changed = pcall(manager.HasActiveChanges, manager)
+        if ok and changed == false then return "clean" end
+    end
+    if type(manager.GetActiveLayoutInfo) == "function" and type(Enum) == "table" and type(Enum.EditModeLayoutType) == "table" then
+        local ok, info = pcall(manager.GetActiveLayoutInfo, manager)
+        local preset = Enum.EditModeLayoutType.Preset
+        if ok and type(info) == "table" and preset ~= nil and info.layoutType == preset then
+            ns.Say("the damage meter's settings were not saved: the game's own Modern and Classic layouts cannot be changed. "
+                .. "Make a layout of your own in the game's Edit Mode (Shift-click Edit Mode in the Escape menu), then set the meter up again.")
+            return "preset"
+        end
+    end
+    if type(manager.SaveLayouts) == "function" and pcall(manager.SaveLayouts, manager) then
+        ns.Say("the damage meter's settings are saved in the game's layout.")
+        return "saved"
+    end
+    ns.Say("the damage meter's settings could not be saved from here: open the game's Edit Mode (Shift-click Edit Mode in the Escape menu) and save there.")
+    return false
+end
+
+-- What a right-click on the meter's box in edit mode opens: the game's box of settings for
+-- the meter, or the addon's Meter page when that box is not there to open.
+function Meter.OnBoxMenu()
+    if Meter.OpenGameSettings() then return "game" end
+    return Meter.OpenSettings() and "addon" or false
+end
+
+local placing = false
 
 -- A frame the game's edit mode looks after may have its ClearAllPoints (and SetPoint)
 -- replaced by the game's own, with the plain ones kept beside them: the addon uses the plain
@@ -427,7 +503,10 @@ local function mover(f)
         local left, bottom = measure(f, "GetLeft"), measure(f, "GetBottom")
         Meter.home = (left and bottom) and { "BOTTOMLEFT", math.floor(left + 0.5), math.floor(bottom + 0.5) } or { "CENTER", -250, 19 }
     end
-    return ns.Overhaul.Mover("meter", "Damage meter", width, height, Meter.home)
+    local box = ns.Overhaul.Mover("meter", "Damage meter", width, height, Meter.home)
+    -- a right-click on the box in edit mode opens the meter's settings
+    ns.Overhaul.MoverMenu("meter", Meter.OnBoxMenu)
+    return box
 end
 
 -- Puts the meter on its mover. Left alone while the game's own edit mode is open.

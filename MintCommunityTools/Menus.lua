@@ -55,8 +55,16 @@ local WINDOWS = {
     "GameMenuFrame", "SettingsPanel", "AddonList", "EditModeManagerFrame", "MacroFrame", "MacroPopupFrame", "HelpFrame",
     "InterfaceOptionsFrame", "VideoOptionsFrame", "KeyBindingFrame",
     "StaticPopup1", "StaticPopup2", "StaticPopup3", "StaticPopup4",
+    -- the game's edit mode: the box of settings for whatever is clicked there (the damage
+    -- meter's bar height and the like), and its dialogs
+    "EditModeSystemSettingsDialog", "EditModeNewLayoutDialog", "EditModeImportLayoutDialog", "EditModeImportLayoutLinkDialog",
+    "EditModeUnsavedChangesDialog",
 }
 Menus.WINDOWS = WINDOWS
+-- Windows that fill themselves again while they are open: dressed again after these.
+local REFILLS = {
+    EditModeSystemSettingsDialog = { "UpdateSettings", "UpdateButtons", "UpdateExtraButtons", "AttachToSystemFrame" },
+}
 -- The parts of a window its art is kept in. A part may be a frame or a single texture.
 local PARTS = { "NineSlice", "Border", "BorderBox", "Bg", "BG", "Background", "Inset", "Header", "TopTileStreaks", "PortraitContainer", "TitleBg" }
 local CLOSE = { "CloseButton", "ClosePanelButton" }
@@ -883,7 +891,7 @@ Menus.DressNamed = dressNamed
 function Menus.DressAll()
     local n = 0
     for _, name in ipairs(WINDOWS) do
-        if dressNamed(name) then n = n + 1 end
+        if dressNamed(name, REFILLS[name]) then n = n + 1 end
     end
     return n
 end

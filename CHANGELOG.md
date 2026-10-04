@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.5.6 - 2026-10-04
+
+- **Loot and vendor windows.** The window that opens when you loot something, and a vendor's
+  window, wear the flat skin with the bag windows: a flat panel, flat buttons and tabs, and
+  item slots with the border in the colour of the item's quality. Their switch is the bag
+  windows' switch, on the **Bars** page.
+- **Right-click the damage meter's box.** In `/mint edit`, a right-click on the **Damage
+  meter** box opens the game's own box of settings for the meter (style, numbers, frame
+  width and height, bar height, padding, transparency, text size, visibility), the one the
+  game's Edit Mode shows, without going into the game's Edit Mode. What you change is saved
+  into your game layout when you close the box. It does not open in combat, and it cannot
+  save into the game's own Modern and Classic layouts: for those, make a layout of your own
+  first. Shift-right-click puts the box back where it was, which a plain right-click still
+  does on every other box.
+- **Edit Mode's settings box.** In the game's own Edit Mode, the box of settings that opens
+  when you click something (the damage meter's bar height and spacing, for one) is flat now,
+  like the Edit Mode window itself, and so are Edit Mode's other dialogs.
+- **`/mint uidump loot`** and **`/mint uidump vendor`** record the loot window and a vendor's
+  window for a bug report. Type them while the window is open.
+- **Fixed: thin lines near the bottom of the screen.** The game draws short capped lines
+  between the buttons of its main action bar. It makes them when it lays that bar out, which
+  can be long after login, and puts them where its own bar would be, so they showed up as a
+  row of stray lines under the minimalist UI's bars. They are hidden now, whenever they
+  appear.
+
 ## 0.5.5 - 2026-10-04
 
 A flat skin for the game's damage meter, a quest list that shows every quest you pick up,

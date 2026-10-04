@@ -280,8 +280,8 @@ function SettingsUI.Build(panel, frame)
         y = y - ROW
         note("Until you choose, the bar is as wide as a row of twelve buttons. Move it with Edit mode.")
     end
-    header("Bag windows")
-    check("bags.enabled", "Flat bag windows: plain slots, with the border in the colour of the item's quality")
+    header("Bag, loot and vendor windows")
+    check("bags.enabled", "Flat bag, loot and vendor windows: plain slots, with the border in the colour of the item's quality")
 
     start("chat")
     header("Chat")
@@ -382,7 +382,7 @@ function SettingsUI.Build(panel, frame)
         y = y - ROW
         note("This is the game's own damage meter (Options, or /console damageMeterEnabled 1), in the flat skin. "
             .. "Move it with Edit mode. The bars' height and spacing, the window's size, and the icons are the game's own settings: "
-            .. "open the game's Edit Mode (Shift-click Edit Mode in the Escape menu) and click the meter.")
+            .. "right-click the meter's box in Edit mode to open them (out of combat).")
     end
 
     start("map")

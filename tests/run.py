@@ -1781,6 +1781,43 @@ if S.enabled then
       f:ClearAllPoints()
       assert(not O.Fastened(f, { { "CENTER", box, "CENTER", 0, 0 } }), "nor with no points at all")
       assert(ns.Bars.Check() == 0, "the action bars' buttons each have their one point: nothing to put back")
+      -- The lines the game draws between the main bar's buttons are frames of their own, from
+      -- a pool, made when the game lays its bar out: long after login, and where the game
+      -- would have had the buttons. They are made invisible at the next look.
+      do
+        local had = env.MainActionBar
+        local bar = had or stub("MainActionBar")
+        env.MainActionBar = bar
+        local function loose(name)
+          local f = stub(name)
+          rawset(f, "_alpha", 1)
+          rawset(f, "GetAlpha", function(self) return self._alpha end)
+          rawset(f, "GetObjectType", function() return "Frame" end)
+          return f
+        end
+        local pooled, child, selection, named = { loose(), loose() }, loose(), loose(), loose("SomeNamedFrame")
+        rawset(bar, "VerticalDividersPool", { EnumerateActive = function()
+          local i = 0
+          return function() i = i + 1; return pooled[i] end
+        end })
+        rawset(bar, "Selection", selection)
+        rawset(bar, "GetChildren", function() return child, selection, named, pooled[1] end)
+        assert(ns.Bars.HideLooseArt() == 3, "the two pooled lines and the nameless frame")
+        assert(pooled[1]._alpha == 0 and pooled[2]._alpha == 0 and child._alpha == 0, "are invisible")
+        assert(selection._alpha == 1 and named._alpha == 1, "the edit mode's selection box and a named frame are left alone")
+        assert(ns.Bars.HideLooseArt() == 0, "and then there is nothing to do")
+        pooled[3] = loose()
+        ns.Bars.Check()
+        assert(pooled[3]._alpha == 0, "a line made later is caught by the next look")
+        local inCombat = env.InCombatLockdown
+        env.InCombatLockdown = function() return true end
+        pooled[4] = loose()
+        ns.Bars.Check()
+        env.InCombatLockdown = inCombat
+        assert(pooled[4]._alpha == 0, "in combat too")
+        rawset(bar, "VerticalDividersPool", nil); rawset(bar, "Selection", nil); rawset(bar, "GetChildren", nil)
+        env.MainActionBar = had
+      end
       local b = env.ActionButton1
       local first = { b:GetPoint(1) }
       b:SetPoint(first[1] == "CENTER" and "BOTTOM" or "CENTER", env.UIParent, "CENTER", 0, 50)
@@ -2023,6 +2060,73 @@ if S.enabled then
       rawset(sys, "ClearAllPointsBase", function(self) based = based + 1; return viaGame(self) end)
       assert(M.Place() == true and based == 1 and O.Fastened(sys, one()), "placed with the plain ClearAllPoints where there is one")
       rawset(sys, "ClearAllPointsBase", nil)
+      -- a right-click on its box in edit mode opens the Meter page of the addon's settings;
+      -- Shift-right-click puts the box back, which a plain right-click does on any other box
+      do
+        local saved = O.Settings().positions
+        O.SetEdit(true)
+        saved.meter = { "CENTER", 40, 50 }
+        ns.SettingsUI.ShowPage("general")
+        box._scripts.OnMouseUp(box, "RightButton")
+        assert(ns.UI.CurrentTab() == "settings" and sui.page == "meter" and sui.pages.meter._shown, "right-click: the addon's window on the Meter page")
+        assert(saved.meter ~= nil, "and the box stays where it was dragged to")
+        SHIFT = true
+        box._scripts.OnMouseUp(box, "RightButton")
+        SHIFT = false
+        assert(saved.meter == nil, "Shift-right-click puts it back")
+        local other = mover("chat")
+        saved.chat = { "CENTER", 1, 2 }
+        other._scripts.OnMouseUp(other, "RightButton")
+        assert(saved.chat == nil and sui.page == "meter", "a box with no settings of its own is put back by a plain right-click, as before")
+        saved.meter = { "CENTER", 40, 50 }
+        O.SetEdit(false)
+        box._scripts.OnMouseUp(box, "RightButton")
+        assert(saved.meter ~= nil, "outside edit mode a right-click does nothing")
+        saved.meter = nil
+        ns.SettingsUI.ShowPage("general")
+        -- With the game's edit mode loaded, a right-click opens the GAME's box of settings
+        -- for the meter (style, sizes, text size...), not the addon's page; and when the box
+        -- closes, what was changed is saved into the game's own layout.
+        local dialog, manager = stub("EditModeSystemSettingsDialog"), stub("EditModeManagerFrame")
+        local attached, saves, CHANGED, LAYOUT = {}, 0, true, { layoutType = 1 }
+        rawset(dialog, "AttachToSystemFrame", function(_, f) attached[#attached + 1] = f end)
+        rawset(manager, "IsShown", function() return false end)
+        rawset(manager, "IsEditModeActive", nil)
+        rawset(manager, "HasActiveChanges", function() return CHANGED end)
+        rawset(manager, "GetActiveLayoutInfo", function() return LAYOUT end)
+        rawset(manager, "SaveLayouts", function() saves = saves + 1 end)
+        env.EditModeSystemSettingsDialog, env.EditModeManagerFrame = dialog, manager
+        env.Enum = { EditModeLayoutType = { Preset = 0, Account = 1, Character = 2 } }
+        local function said(text) return out.prints[#out.prints]:find(text, 1, true) ~= nil end
+        O.SetEdit(true)
+        box._scripts.OnMouseUp(box, "RightButton")
+        assert(#attached == 1 and attached[1] == sys and sui.page == "general" and M.dialogOpen == true, "right-click: the game's box of settings is opened for the meter, the addon's page is not")
+        dialog._hooks.OnHide(dialog)
+        assert(saves == 1 and M.dialogOpen == false and said("saved in the game's layout"), "the box closes: what was changed is saved into the game's layout")
+        dialog._hooks.OnHide(dialog)
+        assert(saves == 1, "a box the addon did not open is not its to save")
+        CHANGED = false
+        assert(M.OnBoxMenu() == "game" and M.SaveGameSettings() == "clean" and saves == 1, "nothing changed: nothing saved")
+        CHANGED, LAYOUT = true, { layoutType = 0 }
+        assert(M.OnBoxMenu() == "game" and M.SaveGameSettings() == "preset" and saves == 1 and said("Modern and Classic layouts cannot be changed"), "the game's own layouts cannot be saved to: it says so")
+        LAYOUT = { layoutType = 2 }
+        -- not in combat, and not while the game's own edit mode is open (which opens it itself)
+        local inCombat = env.InCombatLockdown
+        env.InCombatLockdown = function() return true end
+        assert(M.OpenGameSettings() == false and #attached == 3 and said("out of combat"), "not in combat")
+        env.InCombatLockdown = inCombat
+        rawset(manager, "IsShown", function() return true end)
+        assert(M.OpenGameSettings() == false and #attached == 3, "nor while the game's own edit mode is open")
+        M.dialogOpen = true
+        assert(M.SaveGameSettings() == "editing" and saves == 1, "and that edit mode saves for itself")
+        rawset(manager, "IsShown", function() return false end)
+        -- a client without that box: the addon's page
+        env.EditModeSystemSettingsDialog = nil
+        assert(M.OnBoxMenu() == "addon" and sui.page == "meter", "no such box: the addon's Meter page instead")
+        O.SetEdit(false)
+        env.EditModeManagerFrame, env.Enum = nil, nil
+        ns.SettingsUI.ShowPage("general")
+      end
       -- switched off: its box leaves edit mode, and the meter is fastened as the game had it
       flip("meter.enabled", false)
       assert(box.off == true and sys:GetNumPoints() == 1 and select(2, sys:GetPoint(1)) == env.UIParent and select(4, sys:GetPoint(1)) == -250, "off: back where the game had it, its box put away")
@@ -2375,6 +2479,24 @@ if S.enabled then
     assert(M.windows.MacroFrame and macroArt._alpha == 0 and M.dressed[macro] and M.count == 4, "a window that loads later is dressed then")
     assert(ns.settingsui.checks["menus.enabled"], "the game menu has its switch on the General page")
     env.MacroFrame = nil   -- the harness's own, not a global the addon made
+    -- The game's edit mode has a box of settings for whatever is clicked there (the damage
+    -- meter's bar height and the like). It is one of the flat windows, and it fills itself
+    -- again for each thing clicked, while it stays open: dressed again after it does.
+    do
+      local box = MENU.typed(stub("EditModeSystemSettingsDialog"), "Frame")
+      local boxArt, first = MENU.art(), MENU.pushButton("Center")
+      MENU.holding(box, { boxArt }, { first })
+      rawset(box, "UpdateSettings", function() end)
+      env.EditModeSystemSettingsDialog = box
+      M.DressAll()
+      assert(M.windows.EditModeSystemSettingsDialog and boxArt._alpha == 0 and M.dressed[box] and M.dressed[first], "the edit mode's settings box is flat, and the buttons in it")
+      local second, secondArt = MENU.pushButton("Center")
+      MENU.holding(box, { boxArt }, { first, second })
+      assert(not M.dressed[second], "a control it makes later is not dressed yet")
+      box:UpdateSettings()
+      assert(M.dressed[second] and secondArt._alpha == 0, "it is, as soon as the box has filled itself again")
+      env.EditModeSystemSettingsDialog = nil
+    end
   end
 
   -- The cast bar: the game's own bar, flat, on a mover, its fill a plain colour for what it
@@ -2488,6 +2610,45 @@ if S.enabled then
     local M, B, BAG = ns.Menus, ns.Bags, MENU.bag
     local function edge(b) local c = M.dressed[b].edges[1]._colorTexture; return math.floor(c[1] * 100 + 0.5) .. "," .. math.floor(c[2] * 100 + 0.5) .. "," .. math.floor(c[3] * 100 + 0.5) end
     assert(ns.Overhaul.applied.bags and B.count == 1 and M.windows.ContainerFrameCombinedBags, "the bag windows are a piece of the overhaul; the one that exists is dressed")
+    -- The loot window is dressed with them: when it opens, and again when it fills itself.
+    do
+      local loot = MENU.typed(stub("LootFrame"), "Frame")
+      local lootArt, take = MENU.art(), MENU.pushButton("Center")
+      MENU.holding(loot, { lootArt }, { take })
+      rawset(loot, "Open", function() end)
+      rawset(loot, "_shown", true)
+      env.LootFrame = loot
+      assert(B.lootCount == 0 and not M.dressed[loot], "no loot window yet")
+      fire("LOOT_OPENED")
+      B.events._scripts.OnUpdate(B.events, 0.2)
+      assert(B.lootCount == 1 and M.windows.LootFrame and M.dressed[loot] and lootArt._alpha == 0 and M.dressed[take], "the loot window is flat, found when it first opens")
+      local more, moreArt = MENU.pushButton("Center")
+      MENU.holding(loot, { lootArt }, { take, more })
+      loot:Open()
+      assert(M.dressed[more] and moreArt._alpha == 0, "what it holds is dressed again each time it fills itself")
+      assert(B.count == 1 and B.Check() == false, "it is not one of the bag windows: the bag window's box is not for it")
+      env.LootFrame = nil
+    end
+    -- So is a vendor's window. It is filled by a function of the game's that is not the
+    -- window's own, each time a page is turned: dressed again a moment after.
+    do
+      local vendor = MENU.typed(stub("MerchantFrame"), "Frame")
+      local vendorArt, repair = MENU.art(), MENU.pushButton("Center")
+      MENU.holding(vendor, { vendorArt }, { repair })
+      rawset(vendor, "_shown", true)
+      env.MerchantFrame = vendor
+      env.MerchantFrame_Update = function() end
+      fire("MERCHANT_SHOW")
+      B.events._scripts.OnUpdate(B.events, 0.2)
+      assert(M.windows.MerchantFrame and M.dressed[vendor] and vendorArt._alpha == 0 and M.dressed[repair], "a vendor's window is flat, found when it first opens")
+      local nextPage, nextArt = MENU.pushButton("Center")
+      MENU.holding(vendor, { vendorArt }, { repair, nextPage })
+      env.MerchantFrame_Update()
+      assert(not M.dressed[nextPage], "a page turned: not dressed in the same breath")
+      B.events._scripts.OnUpdate(B.events, 0.2)
+      assert(M.dressed[nextPage] and nextArt._alpha == 0, "but a moment later")
+      env.MerchantFrame, env.MerchantFrame_Update = nil, nil
+    end
     assert(M.dressed[BAG.frame] and BAG.nineArt._alpha == 0 and BAG.portrait._alpha == 0, "the window: its border and the bag's portrait gone, a flat panel")
     assert(M.dressed[BAG.close].mark:GetText() == "x" and BAG.closeArt._alpha == 0, "its close button a flat square with an x")
     -- slots

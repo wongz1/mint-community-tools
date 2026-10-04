@@ -653,6 +653,70 @@ end
 -- Art
 ---------------------------------------------------------------------------
 
+-- Art the game keeps as FRAMES of its own on a bar, not as textures on it: the thin capped
+-- lines it draws between the main bar's buttons, where IT would have the buttons. They come
+-- from a pool and are made when the game lays the bar out, which can be long after login
+-- (its edit mode closing, its layout arriving), so sweeping the bar's textures once does not
+-- catch them. They are made invisible here, and looked for again every second: the frames
+-- of the bar's divider pools, and any nameless plain frame that is a child of an art frame
+-- (a pooled frame has no name; a button has one). The edit mode's own selection box is left.
+local DIVIDER_POOLS = { "HorizontalDividersPool", "VerticalDividersPool" }
+
+local function fade(f)
+    if type(f) ~= "table" or type(f.SetAlpha) ~= "function" then return 0 end
+    local alpha
+    if type(f.GetAlpha) == "function" then
+        local ok, a = pcall(f.GetAlpha, f)
+        if ok and type(a) == "number" then alpha = a end
+    end
+    if alpha == 0 then return 0 end
+    pcall(f.SetAlpha, f, 0)
+    return alpha and 1 or 0
+end
+
+local function isLooseFrame(c, bar)
+    if type(c) ~= "table" or c == bar.Selection or type(c.GetObjectType) ~= "function" then return false end
+    local ok, kind = pcall(c.GetObjectType, c)
+    if not ok or kind ~= "Frame" then return false end
+    if type(c.GetName) == "function" then
+        local okName, name = pcall(c.GetName, c)
+        if okName and type(name) == "string" and name ~= "" then return false end
+    end
+    for _, field in ipairs(ART_FIELDS) do
+        if bar[field] == c then return false end   -- already dealt with, by name
+    end
+    return true
+end
+
+-- Returns how many frames had to be made invisible.
+local function hideLooseArt()
+    local n = 0
+    for _, name in ipairs(ART_FRAMES) do
+        local bar = frame(name)
+        if bar then
+            for _, key in ipairs(DIVIDER_POOLS) do
+                local pool = bar[key]
+                if type(pool) == "table" and type(pool.EnumerateActive) == "function" then
+                    pcall(function()
+                        for d in pool:EnumerateActive() do n = n + fade(d) end
+                    end)
+                end
+            end
+            if type(bar.GetChildren) == "function" then
+                local kids = { pcall(bar.GetChildren, bar) }
+                if kids[1] then
+                    for i = 2, #kids do
+                        if isLooseFrame(kids[i], bar) then n = n + fade(kids[i]) end
+                    end
+                end
+            end
+        end
+    end
+    Bars.looseArtHidden = (Bars.looseArtHidden or 0) + n
+    return n
+end
+Bars.HideLooseArt = hideLooseArt
+
 local function hideArt()
     local n = 0
     for _, name in ipairs(ART) do
@@ -675,6 +739,7 @@ local function hideArt()
         end
     end
     Bars.artHidden = n
+    hideLooseArt()
 end
 
 function Bars.Apply()
@@ -747,6 +812,8 @@ end
 -- at every bar and puts back any that moved. Returns how many it had to fix. Not in combat:
 -- the game does not let its action buttons be moved then.
 function Bars.Check()
+    -- art the game has made since the last look (these frames may be touched in combat)
+    hideLooseArt()
     if InCombatLockdown and InCombatLockdown() then return 0 end
     local movers = ns.Overhaul.movers
     local fixed = 0

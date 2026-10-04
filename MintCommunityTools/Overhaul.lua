@@ -319,14 +319,26 @@ function O.Mover(key, label, width, height, default)
             self:StopMovingOrSizing()
             remember(self)
         end)
+        mover.menu = false
         mover:SetScript("OnMouseUp", function(self, button)
-            if button == "RightButton" and editing then O.ResetPosition(self.key) end
+            if button ~= "RightButton" or not editing then return end
+            -- A box whose piece has settings of its own opens them; with Shift it is put back.
+            if type(self.menu) == "function" and not (IsShiftKeyDown and IsShiftKeyDown()) then
+                pcall(self.menu)
+                return
+            end
+            O.ResetPosition(self.key)
         end)
         mover:SetScript("OnEnter", function(self)
             if not (editing and GameTooltip) then return end
             GameTooltip:SetOwner(self, "ANCHOR_TOP")
             GameTooltip:SetText(self.label, 1, 1, 1)
-            GameTooltip:AddLine("Drag to move. Right-click to put it back.", 0.6, 0.6, 0.6)
+            if type(self.menu) == "function" then
+                GameTooltip:AddLine("Drag to move. Right-click for its settings menu.", 0.6, 0.6, 0.6)
+                GameTooltip:AddLine("Shift-right-click to put it back.", 0.6, 0.6, 0.6)
+            else
+                GameTooltip:AddLine("Drag to move. Right-click to put it back.", 0.6, 0.6, 0.6)
+            end
             GameTooltip:Show()
         end)
         mover:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
@@ -342,6 +354,15 @@ function O.Mover(key, label, width, height, default)
     paint(mover)
     mover:Show()
     return mover
+end
+
+--- Gives a mover's box something to open on a right-click in edit mode (its piece's settings),
+--- in place of putting it back, which Shift-right-click then does. nil takes it away again.
+function O.MoverMenu(key, fn)
+    local mover = movers[key]
+    if not mover then return false end
+    mover.menu = type(fn) == "function" and fn or false
+    return true
 end
 
 -- Puts a mover away: its piece has been turned off, and there is nothing on it to move. The

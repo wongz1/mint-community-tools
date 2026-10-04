@@ -20,6 +20,8 @@
     /mint uidump chat records the chat windows, and with them every point the main window
     is fastened by, its size and place, and what the game had done to it each time the addon
     had to put it back on its mover. Type it while the window is misbehaving, before a reload.
+    /mint uidump loot records the loot window: type it while one is open.
+    /mint uidump vendor records a vendor's window: type it while one is open.
     /mint uidump meter records the game's own damage meter: have its window on screen, with
     a few bars in it (hit something first), when you type it. It also lists everything the
     game has with "DamageMeter" in its name, since nothing says what this client calls it.
@@ -58,7 +60,7 @@ local ROOTS = {
 
 -- /mint uidump menus: the game menu and the windows it opens, a good way down.
 local MENU_ROOTS = {
-    { "GameMenuFrame", 4 }, { "SettingsPanel", 4 }, { "AddonList", 4 }, { "EditModeManagerFrame", 3 },
+    { "GameMenuFrame", 4 }, { "SettingsPanel", 4 }, { "AddonList", 4 }, { "EditModeManagerFrame", 3 }, { "EditModeSystemSettingsDialog", 5 },
     { "MacroFrame", 3 }, { "HelpFrame", 2 }, { "KeyBindingFrame", 2 }, { "InterfaceOptionsFrame", 2 },
     { "VideoOptionsFrame", 2 }, { "StaticPopup1", 2 }, { "GameTooltip", 1 }, { "DropDownList1", 1 },
 }
@@ -83,7 +85,17 @@ local CHAT_ROOTS = {
 local METER_ROOTS = {
     { "DamageMeter", 6 }, { "DamageMeterSessionWindow1", 6 }, { "DamageMeterSessionWindow2", 3 }, { "DamageMeterSessionWindow3", 3 },
 }
-local GROUPS = { menus = MENU_ROOTS, bags = BAG_ROOTS, cast = CAST_ROOTS, chat = CHAT_ROOTS, meter = METER_ROOTS }
+-- /mint uidump loot: the loot window (type it while one is open) and the roll windows.
+local LOOT_ROOTS = {
+    { "LootFrame", 6 }, { "GroupLootContainer", 2 }, { "GroupLootFrame1", 3 }, { "LootHistoryFrame", 2 }, { "GroupLootHistoryFrame", 2 },
+}
+-- /mint uidump vendor: the vendor's window (type it while one is open).
+local VENDOR_ROOTS = {
+    { "MerchantFrame", 4 }, { "MerchantItem1", 3 }, { "MerchantBuyBackItem", 3 }, { "MerchantFrameTab1", 1 }, { "MerchantRepairAllButton", 1 },
+    { "MerchantSellAllJunkButton", 1 }, { "MerchantMoneyFrame", 2 }, { "MerchantNextPageButton", 1 },
+}
+local GROUPS = { menus = MENU_ROOTS, bags = BAG_ROOTS, cast = CAST_ROOTS, chat = CHAT_ROOTS, meter = METER_ROOTS, loot = LOOT_ROOTS,
+                 vendor = VENDOR_ROOTS }
 
 -- Functions and tables the overhaul would like to use.
 local APIS = {
@@ -283,6 +295,41 @@ local function meterInfo(out)
             if type(name) == "string" and type(fn) == "function" then info.api[#info.api + 1] = name end
         end
         table.sort(info.api)
+    end
+    -- How the game's edit mode keeps the meter's own settings (bar height and the like): the
+    -- numbers it calls the meter and each setting by, and what each layout has for them.
+    info.editMode = { enums = {}, layouts = {} }
+    if type(Enum) == "table" then
+        for name, t in pairs(Enum) do
+            if type(name) == "string" and name:find("DamageMeter") and type(t) == "table" then
+                local copy = {}
+                for k, v in pairs(t) do
+                    if type(k) == "string" and (type(v) == "number" or type(v) == "string") then copy[k] = v end
+                end
+                info.editMode.enums[name] = copy
+            end
+        end
+        if type(Enum.EditModeSystem) == "table" then info.editMode.system = Enum.EditModeSystem.DamageMeter or false end
+    end
+    if type(C_EditMode) == "table" and type(C_EditMode.GetLayouts) == "function" then
+        local ok, all = pcall(C_EditMode.GetLayouts)
+        if ok and type(all) == "table" then
+            info.editMode.activeLayout = type(all.activeLayout) == "number" and all.activeLayout or false
+            for i, layout in ipairs(type(all.layouts) == "table" and all.layouts or {}) do
+                local entry = { name = type(layout.layoutName) == "string" and layout.layoutName or false,
+                                type = type(layout.layoutType) == "number" and layout.layoutType or false, meter = false }
+                for _, sys in ipairs(type(layout.systems) == "table" and layout.systems or {}) do
+                    if type(sys) == "table" and sys.system == info.editMode.system and info.editMode.system then
+                        local settings = {}
+                        for _, st in ipairs(type(sys.settings) == "table" and sys.settings or {}) do
+                            if type(st) == "table" and type(st.setting) == "number" then settings[#settings + 1] = st.setting .. "=" .. tostring(st.value) end
+                        end
+                        entry.meter = table.concat(settings, " ")
+                    end
+                end
+                info.editMode.layouts[i] = entry
+            end
+        end
     end
     if type(GetCVar) == "function" then
         for _, name in ipairs({ "damageMeterEnabled", "damageMeterResetOnNewInstance" }) do
