@@ -352,6 +352,12 @@ local function layoutBags()
     local s = settings()
     local buttons, left = bagButtons()
     for _, b in ipairs(left) do pcall(b.Hide, b) end
+    -- The whole row put away (the default): the bags open with their key, as one window.
+    if s.hideBags then
+        for _, b in ipairs(buttons) do pcall(b.Hide, b) end
+        ns.Overhaul.HideMover("bags")
+        return
+    end
     if #buttons == 0 then return end
     local size, step = s.size, s.size + s.spacing
     local mover = ns.Overhaul.Mover("bags", "Bags", #buttons * step - s.spacing, size, { "BOTTOMRIGHT", -20, 36 })
@@ -756,7 +762,17 @@ function Bars.Check()
             end
         end
     end
-    if movers.bags then
+    if settings().hideBags then
+        -- the game shows a bag's button again at times (a bag put on, its row unfolded)
+        for _, b in ipairs((bagButtons())) do
+            local ok, shown = pcall(b.IsShown, b)
+            if ok and shown == true then
+                pcall(layoutBags)
+                fixed = fixed + 1
+                break
+            end
+        end
+    elseif movers.bags then
         for _, b in ipairs((bagButtons())) do
             if strayed(b, movers.bags) then
                 pcall(layoutBags)
@@ -797,7 +813,7 @@ end
 
 function Bars.OnSettingsChanged(path)
     if path == "bars.hideMicro" then pcall(placeMicro) end
-    if path == "bars.extraBags" then pcall(layoutBags) end
+    if path == "bars.extraBags" or path == "bars.hideBags" then pcall(layoutBags) end
     if path == "bars.xpClassColor" then refreshExperience() end
     -- the bar is fastened to its mover by two corners: it takes the mover's size
     if (path == "bars.xpWidth" or path == "bars.xpHeight") and xp.frame then

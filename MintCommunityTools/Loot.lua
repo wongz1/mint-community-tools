@@ -64,6 +64,14 @@ local function playerName()
     return last and (first .. " " .. last) or first
 end
 
+-- The client's token for where an item is worn (INVTYPE_FEET), or nil for one that is not
+-- worn. Newer clients answer INVTYPE_NON_EQUIP_IGNORE for those, where older ones answered
+-- "": neither is a slot, and the website's format wants the key left out.
+function Loot.WornAt(equipLoc)
+    if type(equipLoc) ~= "string" or equipLoc == "" or equipLoc:find("^INVTYPE_NON_EQUIP") then return nil end
+    return equipLoc
+end
+
 local function zone()
     if not GetRealZoneText then return nil end
     local ok, z = pcall(GetRealZoneText)
@@ -93,7 +101,7 @@ function Loot.Describe(link)
             if type(ilvl) == "number" and ilvl > 0 then item.ilvl = floor(ilvl) end
             if type(itemType) == "string" and itemType ~= "" then item.itemType = itemType end
             if type(itemSubType) == "string" and itemSubType ~= "" then item.itemSubType = itemSubType end
-            if type(equipLoc) == "string" and equipLoc ~= "" then item.equipLoc = equipLoc end
+            item.equipLoc = Loot.WornAt(equipLoc)
             if texture then item.icon = texture end
         end
     end
@@ -119,11 +127,12 @@ function Loot.Describe(link)
     return item
 end
 
--- The item as the website's item API takes it.
+-- The item as the website's item API takes it. (An item seen by an earlier version may
+-- still carry the "not worn" token: it is left out here too.)
 function Loot.Observation(item)
     return {
         id = item.id, name = item.name, quality = item.quality, itemLevel = item.ilvl,
-        itemClass = item.itemType, itemSubclass = item.itemSubType, equipLoc = item.equipLoc,
+        itemClass = item.itemType, itemSubclass = item.itemSubType, equipLoc = Loot.WornAt(item.equipLoc),
         icon = item.icon, stats = item.stats,
     }
 end

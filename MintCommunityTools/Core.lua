@@ -11,10 +11,11 @@
     /mint minimap round | square | auto   the shape of the minimap the button sits around
     /mint ui [on | off | reset]   the minimalist UI overhaul (Settings tab); reset puts every frame back
     /mint edit               edit mode: drag the overhaul's frames where you want them
-    /mint uidump [menus | bags | cast | chat]   record what this client's own interface is made of
+    /mint uidump [menus | bags | cast | chat | meter]   record what this client's own interface is made of
                              (for bug reports); "menus" records the game menu and the windows
                              it opens instead, "bags" the bag windows (have them open), "cast"
-                             the cast bars, "chat" the chat windows
+                             the cast bars, "chat" the chat windows, "meter" the game's damage
+                             meter (have it on screen with a few bars in it)
     /mint region XX          set your region (US, EU, KR, TW, CN) if the client cannot tell the addon
     /mint json               the gear export as raw JSON in the window (for debugging)
     /mint debug              print client build info and which APIs exist (paste this in bug reports)
@@ -40,7 +41,7 @@
 
 local ADDON, ns = ...
 ns.NAME = "MintCommunityTools"
-ns.VERSION = "0.5.4"
+ns.VERSION = "0.5.5"
 
 -- True when Saved.lua has already put the last save in place. The client's own loading,
 -- when it works, happens later, at ADDON_LOADED.

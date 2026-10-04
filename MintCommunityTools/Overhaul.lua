@@ -52,7 +52,7 @@ O.DEFAULTS = {
     enabled = false,
     menuEdit = true,     -- the game menu's Edit Mode button opens this UI's edit mode
     menuButton = true,   -- a Mint Edit Mode button at the bottom of the game menu
-    bars = { enabled = true, size = 32, spacing = 2, hideMicro = false, extraBags = true, xpClassColor = true, xpWidth = 0, xpHeight = 0 },
+    bars = { enabled = true, size = 32, spacing = 2, hideMicro = false, hideBags = true, extraBags = true, xpClassColor = true, xpWidth = 0, xpHeight = 0 },
     -- fontSize 0 and font "default" mean: as the game has them
     chat = { enabled = true, background = true, width = 400, height = 180, fontSize = 0, font = "default" },
     units = {
@@ -63,11 +63,12 @@ O.DEFAULTS = {
         target = { buffs = "above", debuffs = "above", onlyMine = false },
     },
     map = { enabled = true, square = true, size = 180, zone = true, coords = true, localTime = true, gameTime = true },
-    quests = { enabled = true, levels = true, background = false, collapsed = false, width = 250, maxHeight = 420 },
+    quests = { enabled = true, levels = true, background = false, collapsed = false, width = 250, maxHeight = 420, tab = "all" },
     menus = { enabled = true },
     bags = { enabled = true },
     -- width, height and fontSize 0 mean: as the game has them
     cast = { enabled = true, width = 0, height = 0, fontSize = 0, textX = 0, textY = 0 },
+    meter = { enabled = true, background = true, backgroundAlpha = 60, oneColor = false, font = "default", fontSize = 0 },
     positions = {},
 }
 
@@ -578,6 +579,7 @@ local PIECES = {
     { key = "menus", module = "Menus", label = "game menu" },
     { key = "bags", module = "Bags", label = "bag windows" },
     { key = "cast", module = "CastBars", label = "cast bars" },
+    { key = "meter", module = "Meters", label = "damage meter" },
 }
 O.PIECES = PIECES
 

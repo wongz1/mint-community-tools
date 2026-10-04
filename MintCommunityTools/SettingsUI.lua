@@ -94,6 +94,7 @@ local PAGES = {
     { key = "chat", label = "Chat" },
     { key = "units", label = "Units" },
     { key = "cast", label = "Cast bar" },
+    { key = "meter", label = "Meter" },
     { key = "map", label = "Minimap" },
     { key = "quests", label = "Quests" },
 }
@@ -118,6 +119,7 @@ function SettingsUI.Build(panel, frame)
     sui.panel = panel
     sui.pages, sui.pageButtons = {}, {}
     sui.checks, sui.cycles, sui.steppers = {}, {}, {}
+    sui.meterFont = nil
 
     -- The page buttons, across the top.
     local bw = math.floor((CW - (#PAGES - 1) * 2) / #PAGES)
@@ -213,6 +215,7 @@ function SettingsUI.Build(panel, frame)
         if path:match("^chat%.") then owner = ns.Chat
         elseif path:match("^cast%.") then owner = ns.CastBars
         elseif path:match("^bars%.") then owner = ns.Bars
+        elseif path:match("^meter%.") then owner = ns.Meters
         else owner = ns.Units end
         local limit = type(owner) == "table" and type(owner.LIMITS) == "table" and owner.LIMITS[path:match("[^%.]+$")]
         if type(limit) ~= "table" then return false end   -- that part of the addon is not loaded
@@ -265,7 +268,8 @@ function SettingsUI.Build(panel, frame)
     header("Action bars")
     check("bars.enabled", "Flat action bars, each on its own mover; the pet and stance bars, bags and micro menu too")
     check("bars.hideMicro", "Hide the micro menu (Escape and the keybinds still open everything)", 18)
-    check("bars.extraBags", "The keyring and the reagent bag slot in the bag row", 18)
+    check("bars.hideBags", "Hide the bag row: the backpack, the bags and the keyring (your bag key still opens them)", 18)
+    check("bars.extraBags", "The keyring and the reagent bag slot in the bag row, when it is shown", 18)
     header("Experience bar")
     check("bars.xpClassColor", "In your class colour (turn off for the game's own purple)")
     y = y - 2
@@ -358,6 +362,29 @@ function SettingsUI.Build(panel, frame)
         note("Width and height are your own cast bar's. The text size and place are every cast bar's; the place is how far the spell's name sits from the middle of the bar. Each is as the game has it until you choose.")
     end
 
+    start("meter")
+    header("Damage meter")
+    if not ns.Meters then
+        note(SettingsUI.RESTART_NOTE)
+    else
+        check("meter.enabled", "Flat damage meter: the game's own meter without its art, with plain bars")
+        check("meter.background", "A backdrop behind the bars", 18)
+        check("meter.oneColor", "Every bar in your class colour (off: the colours the game gives them)", 18)
+        y = y - 2
+        local COL2, ROW = 18 + 216, W.BUTTON_H + GAP
+        stepper("meter.backgroundAlpha", "Backdrop darkness", 18)
+        y = y - ROW
+        sui.meterFont = W.button(page, "MintCommunityToolsSettingMeterFont", "", 190, function()
+            SettingsUI.Set("meter.font", ns.Units.NextFont(SettingsUI.Get("meter.font")))
+        end)
+        sui.meterFont:SetPoint("TOPLEFT", PAD + 2 + 18, y)
+        stepper("meter.fontSize", "Text size", COL2, function() return ns.Meters.FontSize() end)
+        y = y - ROW
+        note("This is the game's own damage meter (Options, or /console damageMeterEnabled 1), in the flat skin. "
+            .. "Move it with Edit mode. The bars' height and spacing, the window's size, and the icons are the game's own settings: "
+            .. "open the game's Edit Mode (Shift-click Edit Mode in the Escape menu) and click the meter.")
+    end
+
     start("map")
     header("Minimap")
     check("map.enabled", "The minimap on a mover, with the zoom buttons and the round border gone")
@@ -369,11 +396,12 @@ function SettingsUI.Build(panel, frame)
 
     start("quests")
     header("Quest tracker")
-    check("quests.enabled", "The addon's own list of tracked quests, in place of the game's tracker")
+    check("quests.enabled", "The addon's own list of your quests, in place of the game's tracker")
     check("quests.levels", "Each quest's level in front of its title", 18)
     check("quests.background", "A backdrop behind the list", 18)
-    note("Click the list's header to fold it away, a quest to open it in the quest log, and shift-click a quest to stop tracking it. "
-        .. "The game's tracker is hidden while this is on, along with anything else it shows.")
+    note("The list has two tabs: All shows every quest in your quest log, Tracked the ones you are tracking. "
+        .. "Click the list's header to fold it away, a quest to open it in the quest log, and shift-click a quest to track it or stop tracking it. "
+        .. "The mouse wheel scrolls a list that does not fit. The game's tracker is hidden while this is on, along with anything else it shows.")
     finish()
 
     -- Under the pages, whichever is showing: positions, the reload, and the state of things.
@@ -445,6 +473,11 @@ function SettingsUI.Refresh()
     -- a font's name can be any length: the text stays inside its button
     ns.W.fitText(sui.font, 190)
     ns.W.fitText(sui.chatFont, 190)
+    if sui.meterFont then
+        local key = SettingsUI.Get("meter.font")
+        sui.meterFont:SetText("Font: " .. (key == "default" and "as the game has it" or ns.Units.Font(key).label))
+        ns.W.fitText(sui.meterFont, 190)
+    end
     ns.W.fitText(sui.buttonShape, 190)
     sui.buttonShown:SetChecked(ns.DB().minimap.shown and true or false)
     sui.buttonShape:SetText(ns.MinimapShapeLabel())

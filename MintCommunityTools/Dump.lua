@@ -20,6 +20,9 @@
     /mint uidump chat records the chat windows, and with them every point the main window
     is fastened by, its size and place, and what the game had done to it each time the addon
     had to put it back on its mover. Type it while the window is misbehaving, before a reload.
+    /mint uidump meter records the game's own damage meter: have its window on screen, with
+    a few bars in it (hit something first), when you type it. It also lists everything the
+    game has with "DamageMeter" in its name, since nothing says what this client calls it.
 ]]
 
 local ADDON, ns = ...
@@ -76,7 +79,11 @@ local CHAT_ROOTS = {
     { "ChatFrame1EditBox", 0 }, { "ChatFrame1ButtonFrame", 1 }, { "GeneralDockManager", 2 }, { "MintCommunityToolsMover_chat", 0 },
     { "EditModeManagerFrame", 0 }, { "CombatLogQuickButtonFrame_Custom", 0 },
 }
-local GROUPS = { menus = MENU_ROOTS, bags = BAG_ROOTS, cast = CAST_ROOTS, chat = CHAT_ROOTS }
+-- /mint uidump meter: the game's own damage meter, a long way down (a bar is five frames in).
+local METER_ROOTS = {
+    { "DamageMeter", 6 }, { "DamageMeterSessionWindow1", 6 }, { "DamageMeterSessionWindow2", 3 }, { "DamageMeterSessionWindow3", 3 },
+}
+local GROUPS = { menus = MENU_ROOTS, bags = BAG_ROOTS, cast = CAST_ROOTS, chat = CHAT_ROOTS, meter = METER_ROOTS }
 
 -- Functions and tables the overhaul would like to use.
 local APIS = {
@@ -236,6 +243,56 @@ local function walk(frame, parent, depth)
     return d
 end
 
+-- Everything the game has with "DamageMeter" in its name: frames (recorded like the rest, if
+-- they were not already), the functions of each mixin (what there is to hook), the meter's
+-- own API and its settings. Nothing documents this client's meter; this finds it by name.
+local METER_EXTRA_MOST, METER_NAMES_MOST = 12, 80
+local function meterInfo(out)
+    local info = { globals = {}, mixins = {}, api = {}, cvars = {} }
+    local names = {}
+    for k in pairs(_G) do
+        if type(k) == "string" and k:find("DamageMeter") then names[#names + 1] = k end
+    end
+    table.sort(names)
+    local extra = 0
+    for _, k in ipairs(names) do
+        local v = _G[k]
+        local kind = type(v)
+        if kind == "table" and type(v.GetObjectType) == "function" then
+            local ok, t = pcall(v.GetObjectType, v)
+            kind = ok and type(t) == "string" and t or "frame"
+            if not out.frames[k] and extra < METER_EXTRA_MOST then
+                local okWalk, tree = pcall(walk, v, nil, 3)
+                if okWalk then
+                    out.frames[k] = tree
+                    extra = extra + 1
+                end
+            end
+        elseif kind == "table" then
+            local fns = {}
+            for name, fn in pairs(v) do
+                if type(name) == "string" and type(fn) == "function" and #fns < METER_NAMES_MOST then fns[#fns + 1] = name end
+            end
+            table.sort(fns)
+            if #fns > 0 then info.mixins[k] = fns end
+        end
+        info.globals[k] = kind
+    end
+    if type(C_DamageMeter) == "table" then
+        for name, fn in pairs(C_DamageMeter) do
+            if type(name) == "string" and type(fn) == "function" then info.api[#info.api + 1] = name end
+        end
+        table.sort(info.api)
+    end
+    if type(GetCVar) == "function" then
+        for _, name in ipairs({ "damageMeterEnabled", "damageMeterResetOnNewInstance" }) do
+            local ok, v = pcall(GetCVar, name)
+            info.cvars[name] = ok and v ~= nil and tostring(v) or false
+        end
+    end
+    return info
+end
+
 function Dump.Run(group)
     local roots = GROUPS[group or ""] or ROOTS
     nodes = 0
@@ -292,6 +349,10 @@ function Dump.Run(group)
         else
             out.missing[#out.missing + 1] = root[1]
         end
+    end
+    if group == "meter" then
+        local ok, meter = pcall(meterInfo, out)
+        out.meter = ok and meter or { error = tostring(meter) }
     end
     out.count = nodes
     ns.DB().uiDump = out

@@ -1,5 +1,37 @@
 # Changelog
 
+## 0.5.5 - 2026-10-04
+
+A flat skin for the game's damage meter, a quest list that shows every quest you pick up,
+and the bag row put away by default. This version adds a file, so close the game completely
+and start it again after updating: a /reload is not enough.
+
+- **Damage meter.** The game has a damage meter of its own (turn it on in the game's Options,
+  or type `/console damageMeterEnabled 1`). With the minimalist UI on it now wears the flat
+  skin: no header art, plain bars, a flat backdrop. The new **Meter** page of the Settings
+  tab has its switch, the backdrop (on or off, and how dark), every bar in your class colour
+  or in the colours the game gives them, and the font and size of the names and numbers.
+  The meter has its own **Damage meter** box in `/mint edit`, so it moves with the rest.
+  It is still the game's meter: the bars' height and spacing, the window's size, and the
+  icons stay in the game's own Edit Mode (Shift-click **Edit Mode** in the Escape menu, then
+  click the meter), because only the game's own settings can change those safely.
+- **Quest list: All and Tracked.** The quest list now has two tabs. **All** (the default)
+  shows every quest in your quest log, so a quest shows up the moment you pick it up.
+  **Tracked** shows only the ones you are tracking, as before. Shift-click a quest to track
+  it or to stop tracking it. When the list is taller than it may be, the mouse wheel scrolls
+  it.
+- **Chat scroll bar.** The scroll bar that shows when you point at the chat window is flat
+  now, like the ones in the game menu's windows.
+- **The bag row is hidden by default.** The row of bag buttons (the backpack, the four bags,
+  the keyring and the reagent slot) is now put away unless you ask for it: your bag key still
+  opens your bags as one window. To get the row back, untick **Hide the bag row** on the
+  **Bars** page of the Settings tab. It works at once.
+- **Item exports: things that are not worn no longer claim a slot.** Food, reagents and the
+  like were sent to the website with a slot the game invents for "not worn", which showed up
+  for officers as a gap to fill. It is left out now, also for items already recorded.
+- **`/mint uidump meter`** records the game's own damage meter for a bug report or a future
+  skin. Have its window on screen, with a few bars in it, when you type it.
+
 ## 0.5.4 - 2026-10-04
 
 A flat cast bar, a Mint Edit Mode button in the game menu, colour and size options for the

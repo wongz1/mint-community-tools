@@ -1,14 +1,18 @@
 --[[
-    Quests.lua - the quest tracker: the quests you are tracking and what is left to do in
-    each, as a plain list of the addon's own.
+    Quests.lua - the quest tracker: your quests and what is left to do in each, as a plain
+    list of the addon's own.
 
-    A flat header strip ("Quests", and how many are tracked) with the list under it:
+    Two tabs under the header choose what is listed: All (every quest in your quest log, the
+    default) or Tracked (the ones the game says you are tracking). When the list is taller
+    than it may be, the mouse wheel scrolls it.
+
+    A flat header strip ("Quests", and how many are listed) with the list under it:
       - each quest's title, in the colour of its difficulty, with its level in front
         (the settings can leave the level out);
       - under it, its objectives: what is still to do in the text colour, what is done
         dimmed; "Ready to turn in" once the whole quest is complete, "Failed" if it failed.
     Click the header to fold the list away or bring it back. Click a quest to open it in
-    the quest log; shift-click it to stop tracking it. The list sits on a mover, with an
+    the quest log; shift-click it to track it, or to stop tracking it. The list sits on a mover, with an
     optional backdrop behind it, and stops growing at a set height ("+3 more" says what did
     not fit).
 
@@ -33,6 +37,8 @@ local ipairs, type, tostring, pcall = ipairs, type, tostring, pcall
 local floor = math.floor
 
 local HEADER_H = 18
+local TAB_H = 16         -- the two tabs under the header
+local TAB_GAP = 2
 local LINE = 14          -- one line of small text
 local INDENT = 10        -- objectives sit in from the title
 local QUEST_GAP = 4
@@ -94,6 +100,37 @@ function Quests.Source()
     return nil
 end
 
+-- One quest by its id, on a newer client; nil when it has no title to show.
+local function modernQuest(id, tracked)
+    local Q = C_QuestLog
+    local q = { id = id, index = false, level = false, objectives = {}, tracked = tracked and true or false }
+    q.title = call(Q.GetTitleForQuestID, id)
+    local index = call(Q.GetLogIndexForQuestID, id)
+    if type(index) == "number" and not isSecret(index) then
+        q.index = index
+        local info = call(Q.GetInfo, index)
+        if type(info) == "table" and not isSecret(info) then
+            if type(info.level) == "number" then q.level = info.level end
+            if not hasText(q.title) then q.title = info.title end
+        end
+    end
+    if not q.level then
+        local level = call(Q.GetQuestDifficultyLevel, id)
+        if type(level) == "number" then q.level = level end
+    end
+    q.complete = flag(call(Q.IsComplete, id))
+    q.failed = flag(call(Q.IsFailed, id))
+    local objectives = call(Q.GetQuestObjectives, id)
+    if type(objectives) == "table" and not isSecret(objectives) then
+        for _, o in ipairs(objectives) do
+            if type(o) == "table" and hasText(o.text) then
+                q.objectives[#q.objectives + 1] = { text = o.text, done = flag(o.finished) }
+            end
+        end
+    end
+    return hasText(q.title) and q or nil
+end
+
 local function modernList()
     local Q = C_QuestLog
     local out = {}
@@ -102,35 +139,50 @@ local function modernList()
     for i = 1, n do
         local id = call(Q.GetQuestIDForQuestWatchIndex, i)
         if type(id) == "number" and not isSecret(id) then
-            local q = { id = id, index = false, level = false, objectives = {} }
-            q.title = call(Q.GetTitleForQuestID, id)
-            local index = call(Q.GetLogIndexForQuestID, id)
-            if type(index) == "number" and not isSecret(index) then
-                q.index = index
-                local info = call(Q.GetInfo, index)
-                if type(info) == "table" and not isSecret(info) then
-                    if type(info.level) == "number" then q.level = info.level end
-                    if not hasText(q.title) then q.title = info.title end
-                end
-            end
-            if not q.level then
-                local level = call(Q.GetQuestDifficultyLevel, id)
-                if type(level) == "number" then q.level = level end
-            end
-            q.complete = flag(call(Q.IsComplete, id))
-            q.failed = flag(call(Q.IsFailed, id))
-            local objectives = call(Q.GetQuestObjectives, id)
-            if type(objectives) == "table" and not isSecret(objectives) then
-                for _, o in ipairs(objectives) do
-                    if type(o) == "table" and hasText(o.text) then
-                        q.objectives[#q.objectives + 1] = { text = o.text, done = flag(o.finished) }
-                    end
-                end
-            end
-            if hasText(q.title) then out[#out + 1] = q end
+            out[#out + 1] = modernQuest(id, true)
         end
     end
     return out
+end
+
+-- Every quest in the quest log, in the log's own order: its zone headings and anything the
+-- game keeps there out of sight are left out.
+local function modernAll()
+    local Q = C_QuestLog
+    local out = {}
+    local n = call(Q.GetNumQuestLogEntries)
+    if type(n) ~= "number" or isSecret(n) then return out end
+    for index = 1, n do
+        local info = call(Q.GetInfo, index)
+        if type(info) == "table" and not isSecret(info) and not flag(info.isHeader) and not flag(info.isHidden)
+            and not flag(info.isTask) and not flag(info.isBounty) then
+            local id = info.questID
+            if type(id) == "number" and not isSecret(id) then
+                local watch = call(Q.GetQuestWatchType, id)
+                out[#out + 1] = modernQuest(id, watch ~= nil and not isSecret(watch))
+            end
+        end
+    end
+    return out
+end
+
+-- One quest by its row in the quest log, on an older client; nil for a zone heading.
+local function classicQuest(index, tracked)
+    -- title, level, tag, isHeader, isCollapsed, isComplete, frequency, questID
+    local title, level, _, isHeader, _, isComplete, _, id = call(GetQuestLogTitle, index)
+    if not hasText(title) or flag(isHeader) then return nil end
+    local q = { id = type(id) == "number" and id or false, index = index, title = title,
+                level = type(level) == "number" and level or false, objectives = {}, tracked = tracked and true or false }
+    q.complete = isComplete == 1 or isComplete == true
+    q.failed = isComplete == -1
+    local count = call(GetNumQuestLeaderBoards, index)
+    if type(count) == "number" then
+        for j = 1, count do
+            local text, _, finished = call(GetQuestLogLeaderBoard, j, index)
+            if hasText(text) then q.objectives[#q.objectives + 1] = { text = text, done = flag(finished) } end
+        end
+    end
+    return q
 end
 
 local function classicList()
@@ -140,23 +192,18 @@ local function classicList()
     for i = 1, n do
         local index = call(GetQuestIndexForWatch, i)
         if type(index) == "number" and index > 0 then
-            -- title, level, tag, isHeader, isCollapsed, isComplete, frequency, questID
-            local title, level, _, isHeader, _, isComplete, _, id = call(GetQuestLogTitle, index)
-            if hasText(title) and not flag(isHeader) then
-                local q = { id = type(id) == "number" and id or false, index = index, title = title,
-                            level = type(level) == "number" and level or false, objectives = {} }
-                q.complete = isComplete == 1 or isComplete == true
-                q.failed = isComplete == -1
-                local count = call(GetNumQuestLeaderBoards, index)
-                if type(count) == "number" then
-                    for j = 1, count do
-                        local text, _, finished = call(GetQuestLogLeaderBoard, j, index)
-                        if hasText(text) then q.objectives[#q.objectives + 1] = { text = text, done = flag(finished) } end
-                    end
-                end
-                out[#out + 1] = q
-            end
+            out[#out + 1] = classicQuest(index, true)
         end
+    end
+    return out
+end
+
+local function classicAll()
+    local out = {}
+    local n = call(GetNumQuestLogEntries)
+    if type(n) ~= "number" then return out end
+    for index = 1, n do
+        out[#out + 1] = classicQuest(index, flag(call(IsQuestWatched, index)))
     end
     return out
 end
@@ -168,6 +215,26 @@ function Quests.List()
     if source == "modern" then return modernList() end
     if source == "classic" then return classicList() end
     return {}
+end
+
+-- Every quest in the quest log, tracked or not, in the same shape (with `tracked` saying
+-- which are).
+function Quests.All()
+    local source = Quests.Source()
+    if source == "modern" then return modernAll() end
+    if source == "classic" then return classicAll() end
+    return {}
+end
+
+-- Which tab is showing: "all" (every quest in the log) or "tracked".
+function Quests.Tab()
+    return settings().tab == "tracked" and "tracked" or "all"
+end
+
+function Quests.SetTab(tab)
+    settings().tab = tab == "tracked" and "tracked" or "all"
+    ui.first = 1
+    Quests.Refresh()
 end
 
 ---------------------------------------------------------------------------
@@ -203,6 +270,31 @@ function Quests.Untrack(q)
     return done
 end
 
+function Quests.Track(q)
+    if type(q) ~= "table" then return false end
+    local done = false
+    if q.id and type(C_QuestLog) == "table" and type(C_QuestLog.AddQuestWatch) == "function" then
+        done = pcall(C_QuestLog.AddQuestWatch, q.id)
+    elseif q.index and type(AddQuestWatch) == "function" then
+        done = pcall(AddQuestWatch, q.index)
+        if type(QuestWatch_Update) == "function" then pcall(QuestWatch_Update) end
+    end
+    Quests.Refresh()
+    return done
+end
+
+-- The mouse wheel: the list starts so many quests further down (or up).
+function Quests.Scroll(by)
+    local most = ui.list and #ui.list or 1
+    local first = (ui.first or 1) + by
+    if first > most then first = most end
+    if first < 1 then first = 1 end
+    if first == (ui.first or 1) then return false end
+    ui.first = first
+    Quests.Refresh()
+    return true
+end
+
 ---------------------------------------------------------------------------
 -- Drawing
 ---------------------------------------------------------------------------
@@ -233,7 +325,7 @@ local function titleEnter(self)
     GameTooltip:SetOwner(self, "ANCHOR_LEFT")
     pcall(GameTooltip.SetText, GameTooltip, self.quest.title, 1, 0.82, 0)
     GameTooltip:AddLine("Click: open it in the quest log", 0.6, 0.6, 0.6)
-    GameTooltip:AddLine("Shift-click: stop tracking it", 0.6, 0.6, 0.6)
+    GameTooltip:AddLine(self.quest.tracked and "Shift-click: stop tracking it" or "Shift-click: track it", 0.6, 0.6, 0.6)
     GameTooltip:Show()
 end
 
@@ -243,7 +335,11 @@ end
 
 local function titleClick(self)
     if not self.quest then return end
-    if IsShiftKeyDown and IsShiftKeyDown() then Quests.Untrack(self.quest) else Quests.Open(self.quest) end
+    if IsShiftKeyDown and IsShiftKeyDown() then
+        if self.quest.tracked then Quests.Untrack(self.quest) else Quests.Track(self.quest) end
+    else
+        Quests.Open(self.quest)
+    end
 end
 
 local function titleRow(i)
@@ -326,10 +422,28 @@ local function build()
         if GameTooltip then GameTooltip:Hide() end
     end)
 
+    -- The tabs: every quest in the log, or the tracked ones.
+    ui.tabs = {}
+    for i, def in ipairs({ { "all", "All" }, { "tracked", "Tracked" } }) do
+        local b = W.button(ui.frame, "MintCommunityToolsQuestTab_" .. def[1], def[2], 60, function() Quests.SetTab(def[1]) end)
+        b:SetHeight(TAB_H)
+        b.label = def[2]
+        ui.tabs[def[1]] = b
+    end
+    ui.tabs.all:SetPoint("TOPLEFT", ui.header, "BOTTOMLEFT", 0, -TAB_GAP)
+    ui.tabs.all:SetPoint("TOPRIGHT", ui.header, "BOTTOM", -1, -TAB_GAP)
+    ui.tabs.tracked:SetPoint("TOPLEFT", ui.header, "BOTTOM", 1, -TAB_GAP)
+    ui.tabs.tracked:SetPoint("TOPRIGHT", ui.header, "BOTTOMRIGHT", 0, -TAB_GAP)
+
     ui.body = CreateFrame("Frame", nil, ui.frame)
-    ui.body:SetPoint("TOPLEFT", ui.header, "BOTTOMLEFT", 4, -3)
-    ui.body:SetPoint("TOPRIGHT", ui.header, "BOTTOMRIGHT", -4, -3)
+    ui.body:SetPoint("TOPLEFT", ui.header, "BOTTOMLEFT", 4, -3 - TAB_H - TAB_GAP)
+    ui.body:SetPoint("TOPRIGHT", ui.header, "BOTTOMRIGHT", -4, -3 - TAB_H - TAB_GAP)
     ui.body:SetHeight(1)
+    -- The mouse wheel scrolls a list that does not fit (it is only caught while one does not).
+    ui.first = 1
+    ui.frame:SetScript("OnMouseWheel", function(_, delta)
+        if type(delta) == "number" then Quests.Scroll(delta > 0 and -1 or 1) end
+    end)
 
     -- The game tells of a change to the quest log several times over; the list is drawn
     -- again once, a moment later.
@@ -365,18 +479,37 @@ function Quests.Refresh()
     ui.frame:ClearAllPoints()
     ui.frame:SetPoint("TOPLEFT", mover, "TOPLEFT", 0, 0)
 
-    local list = Quests.List()
+    local tab = Quests.Tab()
+    local list = tab == "all" and Quests.All() or Quests.List()
     ui.list = list
-    pcall(ui.count.SetText, ui.count, s.collapsed and (#list .. " tracked, folded") or (#list .. " tracked"))
+    local what = tab == "all" and (#list == 1 and " quest" or " quests") or " tracked"
+    pcall(ui.count.SetText, ui.count, #list .. what .. (s.collapsed and ", folded" or ""))
+    for key, b in pairs(ui.tabs) do
+        W.setSelected(b, key == tab)
+        if s.collapsed then b:Hide() else b:Show() end
+    end
+
+    -- Where the list starts: further down once the mouse wheel has scrolled it.
+    local first = ui.first or 1
+    if first > #list then first = #list end
+    if first < 1 then first = 1 end
+    ui.first = first
 
     local titles, lines, y, shown = 0, 0, 0, 0
+    local cut = false
     if not s.collapsed then
-        for i, q in ipairs(list) do
+        if first > 1 then
+            lines = lines + 1
+            y = y - placeLine(lines, ("%d above"):format(first - 1), W.COLOR.dim, y, inner + INDENT) - QUEST_GAP
+        end
+        for i = first, #list do
+            local q = list[i]
             -- Would this quest run past the height the list may take? Say how many are left out.
             local need = LINE + math.max(1, #q.objectives) * LINE
             if shown > 0 and -y + need > s.maxHeight then
                 lines = lines + 1
-                y = y - placeLine(lines, ("+%d more"):format(#list - shown), W.COLOR.dim, y, inner + INDENT) - QUEST_GAP
+                y = y - placeLine(lines, ("+%d more"):format(#list - (first - 1) - shown), W.COLOR.dim, y, inner + INDENT) - QUEST_GAP
+                cut = true
                 break
             end
             titles = titles + 1
@@ -405,9 +538,14 @@ function Quests.Refresh()
         end
         if #list == 0 then
             lines = lines + 1
-            y = y - placeLine(lines, "Nothing tracked. Track a quest from the quest log.", W.COLOR.dim, y, inner + INDENT) - QUEST_GAP
+            local none = tab == "all" and "No quests in your quest log." or "Nothing tracked. Shift-click a quest on the All tab to track it."
+            y = y - placeLine(lines, none, W.COLOR.dim, y, inner + INDENT) - QUEST_GAP
         end
     end
+    -- The wheel is the list's only while there is more of it than fits: otherwise it is the
+    -- game's (the camera's) as anywhere else on screen.
+    if type(ui.frame.EnableMouseWheel) == "function" then ui.frame:EnableMouseWheel((cut or first > 1) and not s.collapsed) end
+    ui.scrolls = (cut or first > 1) and not s.collapsed
     for i = titles + 1, #ui.titles do
         ui.titles[i].quest = false
         ui.titles[i]:Hide()
@@ -418,7 +556,7 @@ function Quests.Refresh()
     local bodyH = -y
     ui.body:SetHeight(bodyH > 0 and bodyH or 1)
     if s.collapsed then ui.body:Hide() else ui.body:Show() end
-    ui.frame:SetSize(width, HEADER_H + (bodyH > 0 and bodyH + 3 or 0))
+    ui.frame:SetSize(width, HEADER_H + (bodyH > 0 and bodyH + 3 + TAB_H + TAB_GAP or 0))
     if s.background and not s.collapsed then ui.backdrop:Show() else ui.backdrop:Hide() end
     ui.frame:Show()
 end

@@ -175,6 +175,12 @@ local function skinFrame(i)
         pcall(edit.SetPoint, edit, "TOPRIGHT", cf, "BOTTOMRIGHT", 2, -4)
     end
     pcall(cf.SetClampRectInsets, cf, 0, 0, 0, 0)
+    -- The scroll bar that shows under the mouse: a thin dark track and a flat thumb, as the
+    -- game menu's windows have. (That code loads after this file; it is there by now.)
+    if type(cf.ScrollBar) == "table" and ns.Menus and ns.Menus.FlatScrollBar then
+        local ok, done = pcall(ns.Menus.As, "chat", ns.Menus.FlatScrollBar, cf.ScrollBar)
+        if ok and done then Chat.scrollBars = (Chat.scrollBars or 0) + 1 end
+    end
     return true
 end
 

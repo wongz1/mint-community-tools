@@ -551,6 +551,12 @@ local function flatScrollBar(f)
     return true
 end
 
+-- For the other files that dress a scroll bar of the game's (the chat windows').
+function Menus.FlatScrollBar(f)
+    if type(f) ~= "table" or not isScrollBar(f) then return false end
+    return flatScrollBar(f)
+end
+
 -- A framed area inside a window: a frame whose border is nine pieces drawn on it. The
 -- pieces go; a 1px border and a faint darkening take their place.
 local function isNineSlice(f)

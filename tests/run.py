@@ -38,7 +38,7 @@ ROOT = Path(__file__).resolve().parent.parent
 ADDON_DIR = ROOT / "MintCommunityTools"
 # The .toc's load order, without Saved.lua (a link to the game's save file; absent here).
 FILES = ["Encode.lua", "Collect.lua", "Loot.lua", "UI.lua", "LootUI.lua", "Minimap.lua",
-         "Overhaul.lua", "ActionBars.lua", "Chat.lua", "UnitFrames.lua", "Map.lua", "Quests.lua", "Menus.lua", "Bags.lua", "CastBars.lua", "SettingsUI.lua", "Dump.lua", "Core.lua"]
+         "Overhaul.lua", "ActionBars.lua", "Chat.lua", "UnitFrames.lua", "Map.lua", "Quests.lua", "Menus.lua", "Bags.lua", "CastBars.lua", "Meters.lua", "SettingsUI.lua", "Dump.lua", "Core.lua"]
 VARIANTS = ["forever", "classic", "mainline"]
 VERBOSE = "-v" in sys.argv
 # --write-fixtures saves the export strings the addon actually produced, for the website's
@@ -590,7 +590,7 @@ elseif VARIANT == "classic" then
     minimapAngle = 90,   -- where version 0.1 kept it
     loot = { minQuality = 0, watch = true, log = { SAVED_ENTRY } },
     items = { [11726] = SAVED_ITEM },
-    ui = { enabled = true, units = { player = { buffs = "below" } } },   -- the minimalist UI, partly configured
+    ui = { enabled = true, units = { player = { buffs = "below" } }, bars = { hideBags = false }, quests = { tab = "tracked" } },   -- the minimalist UI, partly configured: the bag row shown, the quest list on its Tracked tab
   }
 elseif VARIANT == "mainline" then
   -- Mainline-style client: UnitName's second value is the realm, no Classic talent API,
@@ -690,6 +690,9 @@ if VARIANT == "classic" then
     if not q then return nil end
     return q.title, q.level, nil, false, false, q.complete and 1 or nil, 0, index + 99
   end
+  env.GetNumQuestLogEntries = function() return 5, 4 end
+  env.IsQuestWatched = function(index) for _, w in ipairs(WATCHED) do if w == index + 99 then return true end end return false end
+  env.AddQuestWatch = function(index) table.insert(WATCHED, index + 99) end
   env.GetNumQuestLeaderBoards = function(index) return #QUESTS[index + 99].objectives end
   env.GetQuestLogLeaderBoard = function(j, index)
     local o = QUESTS[index + 99].objectives[j]
@@ -703,7 +706,14 @@ elseif VARIANT == "mainline" then
     GetQuestIDForQuestWatchIndex = function(i) return WATCHED[i] end,
     GetTitleForQuestID = function(id) return QUESTS[id] and QUESTS[id].title end,
     GetLogIndexForQuestID = function(id) return id - 99 end,
-    GetInfo = function(index) local q = QUESTS[index + 99]; return q and { title = q.title, level = q.level, questID = index + 99, isHeader = false } end,
+    GetInfo = function(index)
+      if index == 1 then return { title = "Elwynn Forest", isHeader = true, questID = 100 } end   -- a zone heading has an id too
+      local q = QUESTS[index + 99]
+      return q and { title = q.title, level = q.level, questID = index + 99, isHeader = false }
+    end,
+    GetNumQuestLogEntries = function() return 5, 4 end,
+    GetQuestWatchType = function(id) for _, w in ipairs(WATCHED) do if w == id then return 0 end end return nil end,
+    AddQuestWatch = function(id) table.insert(WATCHED, id) end,
     IsComplete = function(id) return QUESTS[id].complete or false end,
     IsFailed = function() return false end,
     GetQuestObjectives = function(id)
@@ -720,6 +730,18 @@ env.IsShiftKeyDown = function() return SHIFT end
 env.HUD_EDIT_MODE_MENU = "Edit Mode"
 -- The chat windows and the edit box say what font they have, as the game's do: Arial at 14
 -- until something sets another. The game's own way of setting a window's text size is here too.
+-- The main chat window's scroll bar, as the client has it: a track of three pieces with a
+-- thumb of three pieces on it.
+local CHAT_BAR = { track = stub(), thumb = stub(), bar = stub() }
+for _, holder in ipairs({ CHAT_BAR.track, CHAT_BAR.thumb }) do
+  rawset(holder, "_made", {})
+  rawset(holder, "CreateTexture", function(self) local t = stub(); table.insert(self._made, t); return t end)
+  for _, key in ipairs({ "Begin", "End", "Middle" }) do rawset(holder, key, stub()) end
+end
+rawset(CHAT_BAR.track, "Thumb", CHAT_BAR.thumb)
+rawset(CHAT_BAR.bar, "Track", CHAT_BAR.track)
+rawset(CHAT_BAR.bar, "Back", stub())
+rawset(env.ChatFrame1, "ScrollBar", CHAT_BAR.bar)
 for _, n in ipairs({ "ChatFrame1", "ChatFrame2", "ChatFrame1EditBox" }) do
   rawset(env[n], "GetFont", function(self)
     local f = rawget(self, "_font")
@@ -995,7 +1017,7 @@ assert(logSize() == savedBefore + 1, "a loot line is logged")
 -- The client hands the saved data over after the addon has started fresh (mainline only):
 -- the saved log comes first, and what this session has seen follows it.
 if VARIANT == "mainline" then
-  env.MintCommunityToolsDB = { minimap = { angle = 45 }, loot = { log = { SAVED_ENTRY }, watch = false }, items = { [11726] = SAVED_ITEM }, ui = { enabled = true } }
+  env.MintCommunityToolsDB = { minimap = { angle = 45 }, loot = { log = { SAVED_ENTRY }, watch = false }, items = { [11726] = SAVED_ITEM }, ui = { enabled = true, bars = { hideBags = false }, quests = { tab = "tracked" } } }
   fire("PLAYER_ENTERING_WORLD")
   assert(ns.db == env.MintCommunityToolsDB, "the saved table is the one in use")
   assert(logSize() == 2 and ns.Loot.Entries(0)[1].id == 16800 and ns.Loot.Entries(0)[2].id == 11726, "this session's loot follows the saved log")
@@ -1511,6 +1533,22 @@ if S.enabled then
     assert(ns.Bars.Check() == 0, "and nothing is put back while it is hidden")
     flip("bars.hideMicro", false)
     assert(microBar._shown and env.CharacterMicroButton._parent == microBar, "shown again at once")
+    -- the bag row: hidden unless asked for (these tests asked for it), and put away or brought
+    -- back at once, mover and all
+    do
+      local bag, pack, key = env.CharacterBag0Slot, env.MainMenuBarBackpackButton, env.KeyRingButton
+      assert(ns.Overhaul.DEFAULTS.bars.hideBags == true, "the bag row is hidden by default")
+      assert(S.bars.hideBags == false and bag._shown and pack._shown and mover("bags").off == false, "shown here: the saved settings say so")
+      flip("bars.hideBags", true)
+      assert(bag._shown == false and pack._shown == false and key._shown == false, "hidden at once: the backpack, the bags and the keyring")
+      assert(mover("bags").off == true and mover("bags")._shown == false and ns.Overhaul.needsReload == false, "its box leaves edit mode, and no reload is asked for")
+      assert(ns.Bars.Check() == 0, "and nothing is put back while it is hidden")
+      bag:Show()
+      assert(ns.Bars.Check() == 1 and bag._shown == false and ns.Bars.Check() == 0, "a button the game shows again is put away again")
+      flip("bars.hideBags", false)
+      assert(bag._shown and pack._shown and key._shown and mover("bags").off == false and bag._point[2] == mover("bags"), "shown again at once, on its box")
+      assert(ns.Bars.Check() == 0, "with nothing out of place")
+    end
     -- Every switch on every page works at once, except turning OFF one of the four pieces that
     -- take the game's frames apart (or the whole overhaul while one of those is set up): only
     -- those ask for a reload, and flipping the switch back takes the request away again.
@@ -1529,7 +1567,7 @@ if S.enabled then
       flip(path, was)
       assert(ns.Overhaul.needsReload == false, path .. ": flipped back, no reload is wanted")
     end
-    assert(n == 28, "every switch was flipped: " .. n)
+    assert(n == 32, "every switch was flipped: " .. n)
     assert(tagged == 5 and ns.SettingsUI.RELOAD_TAG == "(turning off needs a reload)", "five switches are marked: " .. tagged)
     assert(sui.checks["bars.enabled"].label:GetText():find("|cff8c8c8c(turning off needs a reload)|r", 1, true), "the mark is dimmed, after the label")
     for _, piece in ipairs(ns.Overhaul.PIECES) do
@@ -1678,6 +1716,13 @@ if S.enabled then
     assert(C.Check() == true and onMover(), "put back once the mouse is let go")
     env.EditModeManagerFrame, env.IsMouseButtonDown = nil, nil
 
+    -- The chat window's scroll bar wears the flat skin too: its track's and thumb's art is
+    -- invisible, and each has a flat strip of the addon's own.
+    assert(CHAT_BAR.track.Begin._alpha == 0 and CHAT_BAR.track.Middle._alpha == 0 and CHAT_BAR.track.End._alpha == 0, "the scroll bar's track has no art")
+    assert(CHAT_BAR.thumb.Begin._alpha == 0 and CHAT_BAR.thumb.Middle._alpha == 0, "nor has its thumb")
+    assert(#CHAT_BAR.track._made == 5 and #CHAT_BAR.thumb._made == 5 and C.scrollBars == 1, "each is a flat strip with a 1px border; one window has such a bar here: " .. tostring(C.scrollBars))
+    assert(ns.Menus.FlatScrollBar(stub()) == false and ns.Menus.FlatScrollBar(nil) == false, "a frame that is no scroll bar is left alone")
+
     -- What a level-up did in the game: a point of the game's own ADDED to the window, the
     -- addon's two left on. The first point still names the mover, the window is stretched
     -- between the mover and the game's point, and dragging the mover no longer moves it.
@@ -1813,6 +1858,188 @@ if S.enabled then
     assert(box._size[1] == 406 and box._size[2] == 8, "and 0 is the size it came with")
   end
 
+  -- The game's own damage meter, in the flat skin. Built here as /mint uidump meter recorded
+  -- it: a window with a header, a body with a textured background and a scrolling list of
+  -- bars, each a status bar with a shadowed frame, a name and a number.
+  do
+    local M, sui = ns.Meters, ns.settingsui
+    local WHITE, ARIAL, FRIZ = "Interface\\Buttons\\WHITE8X8", "Fonts\\ARIALN.TTF", "Fonts\\FRIZQT__.TTF"
+    local function flip(path, on)
+      local box = sui.checks[path]
+      rawset(box, "_checked", on)
+      box._scripts.OnClick(box)
+    end
+    local function holder(name)
+      local f = stub(name)
+      rawset(f, "_made", {})
+      rawset(f, "CreateTexture", function(self) local t = stub(); table.insert(self._made, t); return t end)
+      return f
+    end
+    local function art(alpha)
+      local t = stub()
+      rawset(t, "_alpha", alpha or 1)
+      rawset(t, "GetAlpha", function(self) return self._alpha end)
+      return t
+    end
+    local function words()
+      local fs = stub()
+      rawset(fs, "GetFont", function(self) local f = rawget(self, "_font"); if f then return f[1], f[2], f[3] end; return ARIAL, 12, "" end)
+      return fs
+    end
+    local function bar(r, g, b)
+      local entry, sb, fillTex = stub(), holder(), stub()
+      rawset(fillTex, "_atlas", "UI-HUD-CoolDownManager-Bar")
+      rawset(fillTex, "GetAtlas", function(self) return self._atlas or nil end)
+      rawset(fillTex, "SetAtlas", function(self, a) rawset(self, "_atlas", a) end)
+      rawset(sb, "GetStatusBarTexture", function() return fillTex end)
+      rawset(sb, "SetStatusBarTexture", function(self, t) rawset(self, "_barTexture", t); rawset(fillTex, "_atlas", false) end)
+      rawset(sb, "GetStatusBarColor", function(self) return unpack(self._color) end)
+      rawset(sb, "_color", { r, g, b, 1 })
+      rawset(sb, "Background", art(1)); rawset(sb, "BackgroundEdge", art(1))
+      rawset(sb, "Name", words()); rawset(sb, "Value", words())
+      rawset(sb, "fillTex", fillTex)
+      rawset(entry, "StatusBar", sb)
+      return entry
+    end
+    local function colour(e) local c = e.StatusBar._color; return math.floor(c[1] * 100 + 0.5) .. "," .. math.floor(c[2] * 100 + 0.5) .. "," .. math.floor(c[3] * 100 + 0.5) end
+
+    assert(ns.Overhaul.applied.meter == true and M.Check() == 0, "with no meter on screen the piece is set up and finds nothing, without an error")
+
+    local win, body, box, target = holder("DamageMeterSessionWindow1"), holder(), stub(), stub()
+    local bars = { bar(0.2, 0.4, 0.9), bar(0.9, 0.8, 0.1) }
+    rawset(win, "GetObjectType", function() return "Frame" end)
+    rawset(win, "Header", art(1))
+    rawset(win, "MinimizeContainer", body)
+    rawset(body, "Background", art(0.5))
+    rawset(body, "ScrollBox", box)
+    rawset(box, "ScrollTarget", target)
+    rawset(box, "Update", function() end)
+    rawset(target, "GetChildren", function() return unpack(bars) end)
+    local minimize = holder()
+    rawset(minimize, "IsObjectType", function(_, kind) return kind == "Button" end)
+    rawset(win, "MinimizeButton", minimize)
+    env.DamageMeterSessionWindow1 = win
+
+    assert(M.Check() == 1, "the meter's window is found by name")
+    local a, b = bars[1], bars[2]
+    assert(win.Header._alpha == 0 and body.Background._alpha == 0, "the header's art and the textured background are invisible")
+    local strip, backdrop = win._made[1], body._made[1]
+    assert(strip._colorTexture and strip._shown and backdrop._colorTexture[4] == 0.6 and backdrop._shown, "a flat header strip and a flat backdrop, 60% dark, in their place")
+    assert(#body._made == 5, "the backdrop has its four 1px edges: " .. #body._made)
+    assert(a.StatusBar.Background._alpha == 0 and a.StatusBar.BackgroundEdge._alpha == 0 and b.StatusBar.Background._alpha == 0, "each bar's shadowed frame is invisible")
+    assert(a.StatusBar._barTexture == WHITE and a.StatusBar.fillTex._atlas == false and colour(a) == "20,40,90" and colour(b) == "90,80,10", "the fill is plain, in the colour the game gave the bar")
+    assert(a.StatusBar._made[1]._colorTexture[4] == 0.45, "on a dark strip of its own")
+    assert(rawget(a.StatusBar.Name, "_font") == nil and S.meter.fontSize == 0 and S.meter.font == "default", "the text is as the game has it until something is chosen")
+    assert(#minimize._made > 0, "the minimize button is a flat square")
+    assert(sui.steppers["meter.fontSize"].text:GetText() == "Text size: 12" and sui.meterFont:GetText() == "Font: as the game has it", "the page shows what the game has")
+
+    -- the game fills a bar again: its own fill, colour and frame, each put right at once
+    a.StatusBar.fillTex._atlas = "UI-HUD-CoolDownManager-Bar"
+    a.StatusBar:SetStatusBarTexture("UI-HUD-CoolDownManager-Bar")
+    assert(a.StatusBar._barTexture == WHITE, "the plain fill is back in the same breath")
+    a.StatusBar:SetStatusBarColor(1, 0, 0, 1)
+    assert(colour(a) == "100,0,0", "a colour the game gives a bar is kept")
+    a.StatusBar.Background:SetAlpha(0.8)
+    assert(a.StatusBar.Background._alpha == 0, "and its frame stays invisible when the game sets how see-through it is")
+    a.StatusBar.fillTex._atlas = "UI-HUD-CoolDownManager-Bar"   -- put back without a call the addon can see
+    M.Check()
+    assert(a.StatusBar._barTexture == WHITE and a.StatusBar.fillTex._atlas == false, "a fill put back unseen is caught by the next look")
+    -- a bar scrolling into view is dressed when the list updates
+    bars[3] = bar(0.1, 0.9, 0.1)
+    box:Update()
+    assert(bars[3].StatusBar._barTexture == WHITE and bars[3].StatusBar.Background._alpha == 0, "a new bar is dressed as the list updates")
+
+    -- the settings, each at once
+    local function step(path, dir) click("MintCommunityToolsSetting" .. (dir > 0 and "More_" or "Less_") .. path:gsub("%.", "_")) end
+    flip("meter.oneColor", true)
+    assert(colour(a) == "78,61,43" and colour(b) == "78,61,43", "every bar in your class colour: " .. colour(a))
+    b.StatusBar:SetStatusBarColor(0.5, 0.5, 0.5, 1)
+    assert(colour(b) == "78,61,43", "also when the game colours one again")
+    flip("meter.oneColor", false)
+    assert(colour(a) == "100,0,0" and colour(b) == "50,50,50", "off again: the colours the game last gave them")
+    step("meter.fontSize", 1)
+    assert(S.meter.fontSize == 13 and a.StatusBar.Name._font[1] == ARIAL and a.StatusBar.Name._font[2] == 13 and a.StatusBar.Value._font[2] == 13, "a text size, on names and numbers, keeping the font")
+    click("MintCommunityToolsSettingMeterFont")
+    assert(S.meter.font == "friz" and a.StatusBar.Name._font[1] == FRIZ and a.StatusBar.Name._font[2] == 13 and sui.meterFont:GetText() == "Font: Friz Quadrata", "and a font")
+    step("meter.backgroundAlpha", -1)
+    assert(S.meter.backgroundAlpha == 50 and backdrop._colorTexture[4] == 0.5, "a lighter backdrop")
+    flip("meter.background", false)
+    assert(backdrop._colorTexture[4] == 0 and body._made[2]._colorTexture[4] == 0, "or none, edges and all")
+    flip("meter.background", true)
+    assert(backdrop._colorTexture[4] == 0.5, "and back")
+
+    -- switched off: the meter has everything back, at once, and the hooks go quiet
+    flip("meter.enabled", false)
+    assert(ns.Overhaul.needsReload == false and ns.Overhaul.applied.meter == nil, "off without a reload")
+    assert(win.Header._alpha == 1 and body.Background._alpha == 0.5, "the header and the background are back, as see-through as the game had them")
+    assert(a.StatusBar.Background._alpha == 0.8 and a.StatusBar.fillTex._atlas == "UI-HUD-CoolDownManager-Bar", "the bars have their frames and their own fill")
+    assert(a.StatusBar.Name._font[1] == ARIAL and a.StatusBar.Name._font[2] == 12, "and the text its own font and size")
+    assert(strip._shown == false and backdrop._shown == false and a.StatusBar._made[1]._shown == false, "the addon's own textures are put away")
+    a.StatusBar:SetStatusBarTexture("UI-HUD-CoolDownManager-Bar")
+    a.StatusBar.Background:SetAlpha(0.7)
+    assert(a.StatusBar._barTexture == "UI-HUD-CoolDownManager-Bar" and a.StatusBar.Background._alpha == 0.7 and M.Check() == 0, "and the game is left to it")
+    flip("meter.enabled", true)
+    assert(win.Header._alpha == 0 and a.StatusBar._barTexture == WHITE and a.StatusBar.Background._alpha == 0 and strip._shown and backdrop._shown, "on again: dressed again at once")
+    assert(a.StatusBar.Name._font[1] == FRIZ and a.StatusBar.Name._font[2] == 13, "with the chosen text")
+
+    -- The meter on its mover: the frame the game keeps its first window on is fastened to a
+    -- "Damage meter" box, which starts where the game had the meter.
+    do
+      local O = ns.Overhaul
+      local sys = stub("DamageMeter")
+      rawset(sys, "GetObjectType", function() return "Frame" end)
+      local SIZE = { 400, 140 }
+      rawset(sys, "GetWidth", function() return SIZE[1] end)
+      rawset(sys, "GetHeight", function() return SIZE[2] end)
+      rawset(sys, "GetLeft", function() return 310.4 end)
+      rawset(sys, "GetBottom", function() return 419.6 end)
+      sys:SetPoint("CENTER", env.UIParent, "CENTER", -250, 19)
+      env.DamageMeter = sys
+      local function one() return { { "TOPLEFT", mover("meter"), "TOPLEFT", 0, 0 } } end
+      assert(M.Check() == 1, "the next look finds it")
+      local box = mover("meter")
+      assert(box.label == "Damage meter" and box._size[1] == 400 and box._size[2] == 140 and box.off == false, "a Damage meter box, the meter's own size")
+      assert(box._point[1] == "BOTTOMLEFT" and box._point[4] == 310 and box._point[5] == 420, "where the game had the meter: " .. tostring(box._point[1]) .. " " .. tostring(box._point[4]))
+      assert(sys:GetNumPoints() == 1 and O.Fastened(sys, one()), "the meter is fastened to its box by one point")
+      -- the game places it again (its layout arriving): back on the box in the same breath
+      sys:SetPoint("CENTER", env.UIParent, "CENTER", -250, 19)
+      assert(sys:GetNumPoints() == 1 and O.Fastened(sys, one()), "the game placed it: back on its box at once, with no point of the game's left on it")
+      -- resized in the game's edit mode: the box follows at the next look
+      SIZE[1], SIZE[2] = 300, 200
+      assert(M.CheckPlace() == false and box._size[1] == 300 and box._size[2] == 200, "the box takes the meter's new size")
+      -- left to the game's own edit mode while that is open
+      local manager = stub("EditModeManagerFrame")
+      local OPEN = true
+      rawset(manager, "IsShown", function() return OPEN end)
+      rawset(manager, "IsEditModeActive", nil)
+      env.EditModeManagerFrame = manager
+      sys:SetPoint("CENTER", env.UIParent, "CENTER", 100, 100)
+      assert(not O.Fastened(sys, one()) and M.CheckPlace() == false, "left where the game's edit mode puts it while that is open")
+      OPEN = false
+      assert(M.CheckPlace() == true and O.Fastened(sys, one()), "and back on its box once it closes")
+      env.EditModeManagerFrame = nil
+      -- a frame the game's edit mode looks after keeps its plain ClearAllPoints beside the game's own
+      local based, viaGame = 0, sys.ClearAllPoints
+      rawset(sys, "ClearAllPointsBase", function(self) based = based + 1; return viaGame(self) end)
+      assert(M.Place() == true and based == 1 and O.Fastened(sys, one()), "placed with the plain ClearAllPoints where there is one")
+      rawset(sys, "ClearAllPointsBase", nil)
+      -- switched off: its box leaves edit mode, and the meter is fastened as the game had it
+      flip("meter.enabled", false)
+      assert(box.off == true and sys:GetNumPoints() == 1 and select(2, sys:GetPoint(1)) == env.UIParent and select(4, sys:GetPoint(1)) == -250, "off: back where the game had it, its box put away")
+      sys:SetPoint("CENTER", env.UIParent, "CENTER", 5, 5)
+      assert(select(4, sys:GetPoint(1)) == 5 and M.CheckPlace() == false, "and the game is left to place it")
+      flip("meter.enabled", true)
+      assert(box.off == false and O.Fastened(sys, one()), "on again: on its box again")
+      env.DamageMeter = nil
+    end
+
+    S.meter.font, S.meter.fontSize, S.meter.backgroundAlpha = "default", 0, 60
+    ns.Overhaul.Changed("meter.font")
+    assert(a.StatusBar.Name._font[1] == ARIAL and a.StatusBar.Name._font[2] == 12 and backdrop._colorTexture[4] == 0.6, "back to the defaults")
+    env.DamageMeterSessionWindow1 = nil
+    assert(M.Check() == 0, "the meter gone again: nothing to do")
+  end
+
   -- The quest tracker: the addon's own list of what the game says is tracked.
   do
     local Q, qt = ns.Quests, ns.Quests.ui
@@ -1899,6 +2126,68 @@ if S.enabled then
     for i, id in ipairs(saved) do WATCHED[i] = id end
     Q.Refresh()
     assert(#titles() == 3, "and the quests are back")
+
+    -- Two tabs: Tracked (what these tests have looked at so far) and All, every quest in the
+    -- quest log whether it is tracked or not. All is what a new install shows.
+    do
+      local tabs = qt.tabs
+      assert(ns.Overhaul.DEFAULTS.quests.tab == "all", "the All tab is the default")
+      assert(S.quests.tab == "tracked" and Q.Tab() == "tracked" and tabs.tracked.selected == true and tabs.all.selected == false and tabs.all._shown, "on the Tracked tab here: the saved settings say so")
+      assert(#Q.All() == 4 and #Q.List() == 3, "four quests in the log (its zone heading is not one), three of them tracked")
+      click("MintCommunityToolsQuestTab_all")
+      assert(S.quests.tab == "all" and tabs.all.selected == true and tabs.tracked.selected == false, "the All tab")
+      local t = titles()
+      assert(#t == 4 and t[1] == YELLOW .. "[2] Kobold Camp Cleanup|r" and t[2] == YELLOW .. "[4] Brotherhood of Thieves|r" and t[4] == YELLOW .. "[10] A Fishy Peril|r",
+        "every quest in the log, in the log's order: " .. table.concat(t, " / "))
+      assert(qt.count:GetText() == "4 quests", qt.count:GetText())
+      assert(lines()[1] == "Kobold Vermin slain: 3/8 @90,90" and lines()[3] == "Ready to turn in @35,85", "with what is left to do in each, as on the other tab")
+      -- shift-click tracks a quest that is not tracked, and stops tracking one that is
+      local row = qt.titles[2]
+      assert(row.quest.id == 102 and row.quest.tracked == false and qt.titles[1].quest.tracked == true, "each quest says whether it is tracked")
+      SHIFT = true
+      row._scripts.OnClick(row)
+      assert(#WATCHED == 4 and qt.titles[2].quest.tracked == true and #titles() == 4, "shift-click on an untracked quest tracks it; it stays in the list")
+      qt.titles[2]._scripts.OnClick(qt.titles[2])
+      SHIFT = false
+      assert(#WATCHED == 3 and qt.titles[2].quest.tracked == false and #titles() == 4, "and again stops tracking it")
+      -- a quest picked up shows on the All tab without being tracked
+      QUESTS[105] = { title = "Wine Shop Advert", level = 1, objectives = {} }
+      local entries = VARIANT == "classic" and env.GetNumQuestLogEntries or env.C_QuestLog.GetNumQuestLogEntries
+      local function more() return 6, 5 end
+      if VARIANT == "classic" then env.GetNumQuestLogEntries = more else env.C_QuestLog.GetNumQuestLogEntries = more end
+      fire("QUEST_ACCEPTED")
+      tick(0.2)
+      assert(#titles() == 5 and titles()[5]:find("Wine Shop Advert", 1, true) and qt.count:GetText() == "5 quests", "a quest just picked up is in the list, tracked or not")
+      -- a list taller than it may be: the mouse wheel scrolls it, and only then is the wheel caught
+      assert(qt.scrolls == false and qt.first == 1, "everything fits: the wheel is left to the game")
+      S.quests.maxHeight = 80
+      Q.Refresh()
+      assert(#titles() == 2 and lines()[#lines()] == "+3 more @55,55" and qt.scrolls == true, "what does not fit is counted: " .. table.concat(lines(), " / "))
+      qt.frame._scripts.OnMouseWheel(qt.frame, -1)
+      assert(qt.first == 2 and titles()[1] == YELLOW .. "[4] Brotherhood of Thieves|r" and lines()[1] == "1 above @55,55", "wheel down: the list starts one quest further on: " .. table.concat(lines(), " / "))
+      qt.frame._scripts.OnMouseWheel(qt.frame, -1); qt.frame._scripts.OnMouseWheel(qt.frame, -1); qt.frame._scripts.OnMouseWheel(qt.frame, -1)
+      qt.frame._scripts.OnMouseWheel(qt.frame, -1); qt.frame._scripts.OnMouseWheel(qt.frame, -1)
+      assert(qt.first == 5 and #titles() == 1 and titles()[1]:find("Wine Shop Advert", 1, true), "it stops at the last quest")
+      qt.frame._scripts.OnMouseWheel(qt.frame, 1)
+      assert(qt.first == 4, "wheel up: back one")
+      -- changing tab starts at the top again
+      click("MintCommunityToolsQuestTab_tracked")
+      assert(S.quests.tab == "tracked" and qt.first == 1 and qt.count:GetText() == "3 tracked", "the Tracked tab again, from its top")
+      S.quests.maxHeight = 420
+      -- folded: the tabs go with the list
+      click("MintCommunityToolsQuestHeader")
+      assert(tabs.all._shown == false and tabs.tracked._shown == false and qt.frame._size[2] == 18 and qt.scrolls == false, "folded: the header alone, no tabs")
+      click("MintCommunityToolsQuestHeader")
+      assert(tabs.all._shown and #titles() == 3, "unfolded")
+      -- an empty log says so
+      QUESTS[105] = nil
+      if VARIANT == "classic" then env.GetNumQuestLogEntries = function() return 0, 0 end else env.C_QuestLog.GetNumQuestLogEntries = function() return 0, 0 end end
+      click("MintCommunityToolsQuestTab_all")
+      assert(#titles() == 0 and qt.count:GetText() == "0 quests" and lines()[1]:find("No quests in your quest log", 1, true), "an empty quest log says so")
+      if VARIANT == "classic" then env.GetNumQuestLogEntries = entries else env.C_QuestLog.GetNumQuestLogEntries = entries end
+      click("MintCommunityToolsQuestTab_tracked")
+      assert(#titles() == 3, "and back to how it was")
+    end
 
     -- The game takes its own tracker back some time after login (its edit mode layout
     -- arrives): within a second it is hidden again. Not in combat; then at the next look.
@@ -2460,7 +2749,7 @@ do
   local sui = ns.settingsui
   local keys = {}
   for _, def in ipairs(ns.SettingsUI.PAGES) do keys[#keys + 1] = def.key end
-  assert(table.concat(keys, ",") == "general,bars,chat,units,cast,map,quests", "the pages: " .. table.concat(keys, ","))
+  assert(table.concat(keys, ",") == "general,bars,chat,units,cast,meter,map,quests", "the pages: " .. table.concat(keys, ","))
   click("MintCommunityToolsSettingsPage_units")
   assert(sui.page == "units" and sui.pages.units._shown and sui.pages.general._shown == false and sui.pages.quests._shown == false, "one page shows at a time")
   click("MintCommunityToolsSettingsPage_quests")
@@ -2539,6 +2828,16 @@ end
 slash("uidump bags")
 assert(env.MintCommunityToolsDB.uiDump.group == "bags" and env.MintCommunityToolsDB.uiDump.frames.ContainerFrameCombinedBags and env.MintCommunityToolsDB.uiDump.frames.GameMenuFrame == nil,
   "/mint uidump bags records the bag windows, and only those")
+-- Something that is not worn has no equip location in the export, whatever this client calls
+-- "not worn"; an item seen by an earlier version, token and all, is cleaned on the way out.
+do
+  local L = ns.Loot
+  assert(L.WornAt("INVTYPE_NON_EQUIP_IGNORE") == nil and L.WornAt("INVTYPE_NON_EQUIP") == nil and L.WornAt("") == nil and L.WornAt(nil) == nil, "not worn: no slot")
+  assert(L.WornAt("INVTYPE_FEET") == "INVTYPE_FEET" and L.WornAt("INVTYPE_ROBE") == "INVTYPE_ROBE", "a real slot is kept")
+  assert(L.Observation({ id = 117, name = "Tough Jerky", equipLoc = "INVTYPE_NON_EQUIP_IGNORE" }).equipLoc == nil, "left out of the export")
+  assert(L.Observation({ id = 1374, name = "Frayed Shoes", equipLoc = "INVTYPE_FEET" }).equipLoc == "INVTYPE_FEET", "a slot is exported")
+end
+
 slash("uidump menus")
 do
   local menus = env.MintCommunityToolsDB.uiDump
@@ -2553,8 +2852,28 @@ do
   assert(type(d.chat) == "table" and type(d.chat.window) == "table" and type(d.chat.window.points) == "string" and d.chat.apis.FCF_SetChatWindowFontSize == "function",
     "with how the main window is fastened")
 end
+-- /mint uidump meter finds the game's damage meter by name: its frames, what its mixins can
+-- do, and its API.
+do
+  local win = stub("DamageMeterSessionWindow1")
+  rawset(win, "GetObjectType", function() return "Frame" end)
+  env.DamageMeterSessionWindow1 = win
+  local odd = stub("SomeDamageMeterThing")
+  rawset(odd, "GetObjectType", function() return "Frame" end)
+  env.SomeDamageMeterThing = odd
+  env.DamageMeterEntryMixin = { UpdateStyle = function() end, Init = function() end, notAFunction = 1 }
+  env.C_DamageMeter = { GetAvailableCombatSessions = function() end }
+  slash("uidump meter")
+  local d = env.MintCommunityToolsDB.uiDump
+  assert(d.group == "meter" and d.frames.DamageMeterSessionWindow1 and d.frames.Minimap == nil, "/mint uidump meter records the meter's windows")
+  assert(d.frames.SomeDamageMeterThing and d.meter.globals.SomeDamageMeterThing == "Frame", "and any frame with DamageMeter in its name, whatever it is called")
+  assert(table.concat(d.meter.mixins.DamageMeterEntryMixin, ",") == "Init,UpdateStyle", "what each mixin can do: " .. table.concat(d.meter.mixins.DamageMeterEntryMixin, ","))
+  assert(d.meter.api[1] == "GetAvailableCombatSessions" and d.meter.globals.DamageMeterEntryMixin == "table", "and the meter's own API")
+  env.DamageMeterSessionWindow1, env.SomeDamageMeterThing, env.DamageMeterEntryMixin, env.C_DamageMeter = nil, nil, nil, nil
+end
 slash("uidump")
 local dump = env.MintCommunityToolsDB.uiDump
+assert(dump.meter == nil, "the everyday dump does not go looking for the meter")
 assert(type(dump.chat) == "table", "every dump says how the chat window is fastened")
 
 -- A file that came with an update while the game was running is not read by a /reload: the
@@ -2562,9 +2881,9 @@ assert(type(dump.chat) == "table", "every dump says how the chat window is faste
 -- and says what to do.
 do
   assert(#ns.Overhaul.MissingParts() == 0, "every part loaded")
-  local cast = ns.CastBars
-  ns.CastBars = nil
-  assert(table.concat(ns.Overhaul.MissingParts(), ",") == "cast bars", "the part that did not load is named")
+  local cast, meters = ns.CastBars, ns.Meters
+  ns.CastBars, ns.Meters = nil, nil
+  assert(table.concat(ns.Overhaul.MissingParts(), ",") == "cast bars,damage meter", "the parts that did not load are named")
   local before = #out.texts
   local ok, err = pcall(ns.SettingsUI.Build, stub(), stub())
   assert(ok, "the settings window builds without that part: " .. tostring(err))
@@ -2576,8 +2895,9 @@ do
   assert(made == 2, "with none of its own switches (the two counted are the first window's): " .. made)
   assert(ns.settingsui.pages.quests and ns.settingsui.pages.cast, "and the pages after it are there")
   assert(ns.settingsui.steppers["cast.width"] == nil and ns.settingsui.checks["cast.enabled"] == nil and ns.settingsui.steppers["bars.xpWidth"], "the window knows which switches it has")
+  assert(ns.settingsui.checks["meter.enabled"] == nil and ns.settingsui.steppers["meter.fontSize"] == nil and ns.settingsui.meterFont == nil and ns.settingsui.pages.meter, "the same for the damage meter's page")
   assert(pcall(ns.SettingsUI.Refresh), "and the window refreshes")
-  ns.CastBars = cast
+  ns.CastBars, ns.Meters = cast, meters
 end
 ov.dump = { type(dump), dump and dump.count > 0, dump and type(dump.frames.Minimap), dump and dump.apis.UnitXP,
             dump and dump.apis.NoSuchThing == nil, dump and #dump.missing > 0 }
