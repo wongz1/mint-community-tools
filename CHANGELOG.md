@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.3 - 2026-10-03
+
+- **Names, not "You", in the loot tracker.** The **Looted by** column on the Loot tab and in
+  the loot watcher shows the name of the character who received the item. Your own loot shows
+  your character's name, in green, instead of "You".
+
 ## 0.5.2 - 2026-10-03
 
 Flat bag windows, size and text controls for the chat window, and fixes for Edit Mode. This

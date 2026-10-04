@@ -4,7 +4,7 @@ The World of Warcraft addon side of [Minty's Community Manager](https://github.c
 
 The addon is called **Mint Community Tools** in game (`/mint`).
 
-**Status:** v0.5.2. Three features, each a tab of the same window: the **minimalist UI** (the game's own interface in the addon's flat skin: action bars, chat, unit frames, a square minimap, a quest tracker and the game menu's windows, each optional and off by default), the **gear scanner** (scan your equipped gear and talents and export them as a string for the website's Roster page) and the **loot tracker** (a log of what drops and who loots it, with tooltips and chat links, which also collects item data for the website's item database). Raid recording and talent tree export are specified (below) but not built yet.
+**Status:** v0.5.3. Three features, each a tab of the same window: the **minimalist UI** (the game's own interface in the addon's flat skin: action bars, chat, unit frames, a square minimap, a quest tracker and the game menu's windows, each optional and off by default), the **gear scanner** (scan your equipped gear and talents and export them as a string for the website's Roster page) and the **loot tracker** (a log of what drops and who loots it, with tooltips and chat links, which also collects item data for the website's item database). Raid recording and talent tree export are specified (below) but not built yet.
 
 ## What the addon does
 
@@ -45,7 +45,7 @@ Do it again whenever your gear changes. The window refreshes on its own when you
 
 Everything that drops, newest first: what you loot, what your group loots (from the loot lines in chat), and what is left on a corpse (from the loot window). A drop that is seen and then handed out is one line.
 
-- The item's name is in the colour of its quality, next to its icon, who looted it and when.
+- The item's name is in the colour of its quality, next to its icon, the name of the character who looted it (your own character's name, in green, for your own loot) and when.
 - **Hover** a line for the item's own tooltip, with its stats.
 - **Shift-click** a line to link the item in chat, exactly as a shift-click on an item in your bags does. Ctrl-click tries it on.
 - **Showing: ...** filters by quality; the mouse wheel and the arrows page back through the last 500 drops.

@@ -2345,7 +2345,8 @@ def check_loot(result, variant):
     rows = result["rowsUncommon"]
     assert [r["id"] for r in rows] == [e["id"] for e in entries if e["q"] >= 2], rows
     assert rows[0]["name"] == "|cffa335eeArcanist Boots|r |cffffffffx2|r", rows[0]
-    assert rows[0]["who"] == "|cff7fe5a8You|r" and rows[0]["icon"] == "132541"
+    # Who received it is a name, your own character's included (in the addon's green), not "You".
+    assert rows[0]["who"] == f"|cff7fe5a8{me}|r" and rows[0]["icon"] == "132541", rows[0]
     assert rows[1]["name"] == "|cff1eff00Durable Belt of the Bear|r" and rows[1]["who"] == "Charlie"
     assert rows[2]["name"] == "|cff0070ddUncached Crystal|r" and rows[2]["who"] == "|cff888888not looted|r"
     assert result["countUncommon"] == f"{6 + saved} of {7 + saved} drops", result["countUncommon"]

@@ -2,7 +2,8 @@
     LootUI.lua - the Loot tab and the loot watcher.
 
     Both show the loot log (Loot.lua), newest first: the item's icon, its name in the colour
-    of its quality, who received it and when. Hover a row for the item's own tooltip, with
+    of its quality, the name of whoever received it (your own character's name for your own
+    loot, in the addon's green) and when. Hover a row for the item's own tooltip, with
     its stats. Shift-click a row to link the item in chat, as if it were in your bags;
     Ctrl-click to try it on.
 
@@ -56,8 +57,9 @@ local function nameText(e)
     return text
 end
 
+-- Who received it, by name: your own character's in the addon's green.
 local function whoText(e)
-    if e.mine then return "|cff7fe5a8You|r" end
+    if e.mine then return "|cff7fe5a8" .. (e.to or "You") .. "|r" end
     if e.to then return e.to end
     return "|cff888888not looted|r"
 end
@@ -75,10 +77,10 @@ local function rowEnter(row)
     if not ok then GameTooltip:SetText(e.name or "", 1, 1, 1) end
     GameTooltip:AddLine(" ")
     local where = e.zone and (" in " .. e.zone) or ""
-    if e.mine then
-        GameTooltip:AddLine(sformat("You looted this at %s%s.", W.clock(e.at or e.t), where), 0.6, 0.6, 0.6, true)
-    elseif e.to then
+    if e.to then
         GameTooltip:AddLine(sformat("%s looted this at %s%s.", e.to, W.clock(e.at or e.t), where), 0.6, 0.6, 0.6, true)
+    elseif e.mine then
+        GameTooltip:AddLine(sformat("You looted this at %s%s.", W.clock(e.at or e.t), where), 0.6, 0.6, 0.6, true)
     else
         GameTooltip:AddLine(sformat("Dropped at %s%s. Nobody has looted it.", W.clock(e.t), where), 0.6, 0.6, 0.6, true)
     end
