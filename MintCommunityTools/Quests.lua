@@ -354,7 +354,7 @@ end
 
 -- Draws the list from the game's tracked quests.
 function Quests.Refresh()
-    if not ui.frame then return end
+    if not (ui.frame and Quests.applied) then return end
     local W = ns.W
     local s = settings()
     ui.dirty, ui.elapsed = false, 0
@@ -430,7 +430,8 @@ end
 local function hideBlizzard()
     Quests.hidden = 0
     for _, name in ipairs(BLIZZARD) do
-        if ns.Overhaul.HideBlizzard(frame(name)) then Quests.hidden = Quests.hidden + 1 end
+        -- its events are kept: the tracker is given back as it was when this is switched off
+        if ns.Overhaul.HideBlizzard(frame(name), true) then Quests.hidden = Quests.hidden + 1 end
     end
 end
 
@@ -447,7 +448,7 @@ function Quests.Check()
         if f and type(f.GetParent) == "function" then
             local ok, parent = pcall(f.GetParent, f)
             if ok and parent ~= hider then
-                ns.Overhaul.HideBlizzard(f)
+                ns.Overhaul.HideBlizzard(f, true)
                 fixed = fixed + 1
             end
         end
@@ -466,6 +467,18 @@ end
 
 function Quests.OnEnteringWorld()
     Quests.Refresh()
+end
+
+-- Switched off: the addon's list goes and the game's own tracker comes back.
+function Quests.Unapply()
+    Quests.applied = false
+    if ui.frame then ui.frame:Hide() end
+    ns.Overhaul.HideMover("quests")
+    for _, name in ipairs(BLIZZARD) do
+        local f = frame(name)
+        if f then ns.Overhaul.ShowBlizzard(f) end
+    end
+    Quests.hidden = 0
 end
 
 function Quests.OnSettingsChanged(path)

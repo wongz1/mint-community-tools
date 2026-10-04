@@ -78,6 +78,7 @@ end
 -- Puts the open bag window on its mover. Returns true when it did. Not in combat (the game
 -- does not let a window holding its item buttons be moved then): it is done when combat ends.
 function Bags.Place()
+    if not Bags.applied then return false end
     local f = movable()
     if not f then return false end
     if InCombatLockdown and InCombatLockdown() then
@@ -108,21 +109,23 @@ function Bags.Check()
     if not f then return false end
     if ns.Overhaul.GameEditing() then return false end
     if IsMouseButtonDown and IsMouseButtonDown() then return false end
-    local ok, _, anchor = pcall(f.GetPoint, f, 1)
-    if ok and anchor == ns.Overhaul.movers.bagwindow then return false end
+    -- every point, not the first alone: the game adds one of its own to those the window has
+    local box = ns.Overhaul.movers.bagwindow
+    if box and ns.Overhaul.Fastened(f, { { "BOTTOMRIGHT", box, "BOTTOMRIGHT", 0, 0 } }) then return false end
     return Bags.Place()
 end
 
 -- The sort button is one button the game moves between its bag windows.
 local function dressSort()
-    return ns.Menus.FlatMarked(frame("BagItemAutoSortButton"), "Sort")
+    if ns.Menus.IsOff("bags") then return false end
+    return ns.Menus.As("bags", ns.Menus.FlatMarked, frame("BagItemAutoSortButton"), "Sort")
 end
 
 -- Dresses every bag window that exists. Returns how many there are.
 function Bags.DressAll()
     local n = 0
     for _, name in ipairs(WINDOWS) do
-        if ns.Menus.DressNamed(name, RELAYS) then n = n + 1 end
+        if ns.Menus.DressNamed(name, RELAYS, "bags") then n = n + 1 end
     end
     dressSort()
     return n
@@ -135,7 +138,7 @@ function Bags.Refresh()
         local f = frame(name)
         if f and type(f.IsShown) == "function" then
             local ok, shown = pcall(f.IsShown, f)
-            if ok and shown == true and pcall(ns.Menus.Dress, f, name) then n = n + 1 end
+            if ok and shown == true and pcall(ns.Menus.Dress, f, name, "bags") then n = n + 1 end
         end
     end
     dressSort()
@@ -144,13 +147,14 @@ end
 
 function Bags.Apply()
     if not ns.Menus then error("the window dressing code did not load") end
+    ns.Menus.SetOff("bags", false)
     Bags.count = Bags.DressAll()
     mover()
     if not Bags.events then
         Bags.events = CreateFrame("Frame")
         Bags.dirty, Bags.elapsed, Bags.sinceCheck = false, 0, 0
         for _, ev in ipairs(EVENTS) do pcall(Bags.events.RegisterEvent, Bags.events, ev) end
-        Bags.events:SetScript("OnEvent", function() Bags.dirty = true end)
+        Bags.events:SetScript("OnEvent", function() if Bags.applied then Bags.dirty = true end end)
         Bags.events:SetScript("OnUpdate", function(_, dt)
             dt = type(dt) == "number" and dt or 0
             -- Once a second: is the open bag window still on its mover?
@@ -189,4 +193,13 @@ end
 -- Combat is over: a bag window opened during it goes to its mover now.
 function Bags.OnCombatEnd()
     if Bags.pending then Bags.Place() end
+end
+
+-- Switched off: the bag windows get back what was changed on them, and are the game's to
+-- place again (it places them every time one opens).
+function Bags.Unapply()
+    Bags.applied = false
+    Bags.dirty, Bags.pending = false, nil
+    ns.Menus.SetOff("bags", true)
+    ns.Overhaul.HideMover("bagwindow")
 end

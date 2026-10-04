@@ -11,9 +11,10 @@
     /mint minimap round | square | auto   the shape of the minimap the button sits around
     /mint ui [on | off | reset]   the minimalist UI overhaul (Settings tab); reset puts every frame back
     /mint edit               edit mode: drag the overhaul's frames where you want them
-    /mint uidump [menus | bags]   record what this client's own interface is made of (for bug
-                             reports); "menus" records the game menu and the windows it opens
-                             instead, "bags" the bag windows (have them open)
+    /mint uidump [menus | bags | cast | chat]   record what this client's own interface is made of
+                             (for bug reports); "menus" records the game menu and the windows
+                             it opens instead, "bags" the bag windows (have them open), "cast"
+                             the cast bars, "chat" the chat windows
     /mint region XX          set your region (US, EU, KR, TW, CN) if the client cannot tell the addon
     /mint json               the gear export as raw JSON in the window (for debugging)
     /mint debug              print client build info and which APIs exist (paste this in bug reports)
@@ -39,7 +40,7 @@
 
 local ADDON, ns = ...
 ns.NAME = "MintCommunityTools"
-ns.VERSION = "0.5.3"
+ns.VERSION = "0.5.4"
 
 -- True when Saved.lua has already put the last save in place. The client's own loading,
 -- when it works, happens later, at ADDON_LOADED.
@@ -370,6 +371,11 @@ events:SetScript("OnEvent", function(self, event, ...)
         pcall(ns.InitMinimap)
         pcall(ns.LootUI.InitWatch)
         announce()
+        -- A file that came with an update is only read when the game starts.
+        local missing = ns.Overhaul.MissingParts()
+        if #missing > 0 then
+            say(("this version's %s did not load: close the game completely and start it again (a /reload is not enough)."):format(table.concat(missing, ", ")))
+        end
     elseif event == "PLAYER_ENTERING_WORLD" then
         if ns.AdoptLateDB() then
             ns.loadedFromDisk = true

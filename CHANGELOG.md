@@ -1,5 +1,52 @@
 # Changelog
 
+## 0.5.4 - 2026-10-04
+
+A flat cast bar, a Mint Edit Mode button in the game menu, colour and size options for the
+experience bar, and a fix for the chat window stretching out of place. This version adds a
+file, so close the game completely and start it again after updating: a /reload is not enough.
+
+- **Cast bars.** Your cast bar joins the minimalist UI: no ornate frame, the spell's name on
+  the bar instead of in a box under it, and a plain fill in your class colour (green for a
+  channel, red when interrupted). It has its own **Cast bar** box in `/mint edit`. The
+  target's cast bar gets the same look. The new **Cast bar** page of the Settings tab has its
+  switch, your cast bar's width and height, the size of the spell's name, and how far the
+  name sits left or right, up or down from the middle of the bar.
+- **Mint Edit Mode button.** The game menu (Escape) has a **Mint Edit Mode** button at its
+  bottom while the minimalist UI is on. It opens the minimalist UI's edit mode, the same as
+  `/mint edit`. A switch on the **General** page of the Settings tab removes it.
+- **Switches work at once.** Every switch on the Settings tab now takes effect the moment you
+  click it. That includes turning the minimalist UI or any piece of it **on**, which used to
+  need a reload, and turning the quest tracker, the game menu, the bag windows or the cast
+  bars **off**. "Class colours on players' health bars" and "Hide the micro menu", which
+  silently waited for a reload, are fixed too.
+- **What still needs a reload.** Turning **off** the action bars, chat, unit frames or minimap
+  (or the whole minimalist UI while one of those is on). Those pieces take the game's own
+  frames apart, and only the game can put them back together. Those switches are marked
+  "(turning off needs a reload)" on the Settings tab, which also says so when you flip one,
+  names which, and has the Reload button.
+- **Settings pages renamed.** With a seventh page, two were shortened to fit: "Action bars" is
+  now **Bars** and "Unit frames" is now **Units**.
+- **Experience bar colour and size.** The experience bar is in your class colour, as before.
+  The **Bars** page of the Settings tab has a new **Experience bar** section: a switch that
+  turns the class colour off, for the game's own purple, and the bar's width and height.
+- **Fixed: the chat window stretching and no longer following its box.** The game sometimes
+  fastens the chat window to a place of its own without letting go of where the addon had it
+  (seen after a level-up). The window then stretched between the two, and dragging its box in
+  `/mint edit` no longer moved it. The addon now checks every point the window is held by,
+  not the first one alone, and puts it right on the next frame. The bag window, the cast bar
+  and the action bars' buttons get the same check.
+- **The chat box stays on screen.** The Chat box in `/mint edit` now stops where the tabs
+  above the window and the edit box under it are still on screen, so a chat window dragged
+  to the bottom edge keeps the line you type on.
+- **Updating while the game is running.** A file that comes with an update is only read when
+  the game starts. Until then the Settings tab stopped working at the first page that needed
+  the new file. It now opens as normal, the page says to restart the game, and so does a line
+  in chat at login.
+- **`/mint uidump chat`** records the chat windows for a bug report: every point the main
+  window is held by, its size and place, and what the game had done to it each time the addon
+  had to put it back.
+
 ## 0.5.3 - 2026-10-03
 
 - **Names, not "You", in the loot tracker.** The **Looted by** column on the Loot tab and in

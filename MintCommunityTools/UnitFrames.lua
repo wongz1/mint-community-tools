@@ -758,7 +758,9 @@ local function hideBlizzard()
     if cast and frames.target then
         pcall(cast.SetParent, cast, UIParent)
         pcall(cast.ClearAllPoints, cast)
-        pcall(cast.SetPoint, cast, "TOP", frames.target, "BOTTOM", 0, -60)
+        -- under the frame: its text is on the bar when the cast bars are flat, in a box
+        -- below it when they are the game's
+        pcall(cast.SetPoint, cast, "TOP", frames.target, "BOTTOM", 0, ns.Overhaul.Active("cast") and -8 or -60)
         cast.ignoreFramePositionManager = true
     end
     -- Class resources (combo points, totems) hang off the player frame on a newer client:
@@ -791,13 +793,19 @@ function Units.Apply()
     hideBlizzard()
 end
 
--- Settings changed: sizes, fonts, the portrait and the aura rows follow at once (sizes after
--- combat, when in it).
+-- Settings changed: everything a frame shows is drawn again at once, whatever the setting
+-- was: sizes (after combat, when in it), fonts, the bars' colours, the portrait and the aura
+-- rows. A setting is not waited on until the next time the game says the unit changed.
 function Units.OnSettingsChanged()
     for _, f in pairs(frames) do
         resize(f)
         applyFonts(f)
         layout(f)
+        if exists(f.unit) then
+            updateName(f)
+            updateHealth(f)
+            updatePower(f)
+        end
         updatePortrait(f)
         updateAuras(f)
     end

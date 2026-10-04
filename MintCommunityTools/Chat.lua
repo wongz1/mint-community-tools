@@ -202,16 +202,125 @@ local function placeBackdrop(cf)
 end
 
 -- The main window on its mover, with the backdrop behind it when wanted.
+-- How the main window is fastened to its mover: these two points and no others.
+local function wantedPoints(mover)
+    return { { "TOPLEFT", mover, "TOPLEFT", 4, -4 }, { "BOTTOMRIGHT", mover, "BOTTOMRIGHT", -4, 4 } }
+end
+
+-- A frame the game's edit mode looks after has its SetPoint and ClearAllPoints replaced by
+-- the game's own, which tell its edit mode about every move; the plain ones are kept beside
+-- them. The addon uses the plain ones where there are any: the edit mode has no part in this.
+local function plain(f, method)
+    local base = rawget(f, method .. "Base")
+    if type(base) == "function" then return base end
+    return f[method]
+end
+
+local placing = false
+
 local function placeMain()
     local s = settings()
     local cf = frame("ChatFrame1")
     if not cf then return end
     local mover = ns.Overhaul.Mover("chat", "Chat", limited("width"), limited("height"), { "BOTTOMLEFT", 20, 36 })
+    -- The box stops where the tabs above it and the edit box under it are still on screen;
+    -- the window itself is held by its mover and by nothing else.
+    pcall(mover.SetClampRectInsets, mover, 0, 0, Chat.TAB_ROOM - 4, -(Chat.EDIT_ROOM - 4))
+    pcall(cf.SetClampRectInsets, cf, 0, 0, 0, 0)
+    pcall(cf.SetClampedToScreen, cf, false)
+    placing = true
     pcall(cf.SetUserPlaced, cf, true)
-    pcall(cf.ClearAllPoints, cf)
-    pcall(cf.SetPoint, cf, "TOPLEFT", mover, "TOPLEFT", 4, -4)
-    pcall(cf.SetPoint, cf, "BOTTOMRIGHT", mover, "BOTTOMRIGHT", -4, 4)
+    pcall(plain(cf, "ClearAllPoints"), cf)
+    for _, p in ipairs(wantedPoints(mover)) do pcall(plain(cf, "SetPoint"), cf, p[1], p[2], p[3], p[4], p[5]) end
+    placing = false
     placeBackdrop(cf)
+end
+
+-- A frame's points, written out: "TOPLEFT > UIParent TOPLEFT 4,-4; ...".
+local function describePoints(f)
+    local out = {}
+    local ok, n = pcall(f.GetNumPoints, f)
+    if not ok or type(n) ~= "number" then n = 1 end
+    for i = 1, n do
+        local okPoint, point, to, toPoint, x, y = pcall(f.GetPoint, f, i)
+        if okPoint and type(point) == "string" then
+            local name = "?"
+            if type(to) == "table" and type(to.GetName) == "function" then
+                local okName, got = pcall(to.GetName, to)
+                if okName and type(got) == "string" then name = got end
+            end
+            local okText, text = pcall(string.format, "%s > %s %s %.0f,%.0f", point, name, tostring(toPoint), x, y)
+            out[#out + 1] = okText and text or point
+        end
+    end
+    return table.concat(out, "; ")
+end
+
+local function number(f, method)
+    if type(f[method]) ~= "function" then return nil end
+    local ok, v = pcall(f[method], f)
+    if ok and type(v) == "number" then return math.floor(v * 10 + 0.5) / 10 end
+    return nil
+end
+
+-- What the game had done to the window each time it had to be put back: kept in the saved
+-- data (the last twelve), for /mint uidump chat and a bug report.
+Chat.LOG_MOST = 12
+local function logIncident(cf)
+    local db = ns.DB and ns.DB()
+    if type(db) ~= "table" then return end
+    local log = type(db.chatLog) == "table" and db.chatLog or {}
+    db.chatLog = log
+    local now = time and time() or 0
+    local last = Chat.lastEvent
+    log[#log + 1] = {
+        at = now,
+        points = describePoints(cf),
+        width = number(cf, "GetWidth") or false,
+        height = number(cf, "GetHeight") or false,
+        after = last and last.name or false,
+        ago = last and (now - last.at) or false,
+        combat = (InCombatLockdown and InCombatLockdown()) and true or false,
+    }
+    while #log > Chat.LOG_MOST do table.remove(log, 1) end
+end
+
+-- Everything about the main window's place that a bug report needs (/mint uidump chat).
+function Chat.Facts()
+    local cf, mover = frame("ChatFrame1"), ns.Overhaul.movers.chat
+    local s = settings()
+    local out = { applied = Chat.applied and true or false, width = s.width, height = s.height, fontSize = s.fontSize, font = s.font,
+                  apis = {} }
+    for _, name in ipairs({ "FCF_UpdateDockPosition", "FCF_DockUpdate", "FCF_RestorePositionAndDimensions", "FCF_SavePositionAndDimensions",
+                            "FCF_SetChatWindowFontSize", "UIParent_ManageFramePositions" }) do
+        out.apis[name] = type(_G[name])
+    end
+    local function facts(f)
+        local t = { points = describePoints(f), left = number(f, "GetLeft") or false, bottom = number(f, "GetBottom") or false,
+                    width = number(f, "GetWidth") or false, height = number(f, "GetHeight") or false, scale = number(f, "GetScale") or false }
+        for key, method in pairs({ clamped = "IsClampedToScreen", userPlaced = "IsUserPlaced", movable = "IsMovable", resizable = "IsResizable" }) do
+            if type(f[method]) == "function" then
+                local ok, v = pcall(f[method], f)
+                if ok and type(v) == "boolean" then t[key] = v end
+            end
+        end
+        if type(f.GetClampRectInsets) == "function" then
+            local ok, l, r, top, b = pcall(f.GetClampRectInsets, f)
+            if ok and type(l) == "number" then t.insets = table.concat({ l, r, top, b }, ",") end
+        end
+        return t
+    end
+    if cf then
+        out.window = facts(cf)
+        out.window.plainSetPoint = type(rawget(cf, "SetPointBase")) == "function"
+        local _, size = fontOf(cf)
+        out.window.textSize = size
+        if mover then out.fastened = ns.Overhaul.Fastened(cf, wantedPoints(mover)) end
+    end
+    if mover then out.mover = facts(mover) end
+    local db = ns.DB and ns.DB()
+    out.log = type(db) == "table" and db.chatLog or false
+    return out
 end
 
 -- Is the chat window still fastened to its mover? If the game has fastened it elsewhere, it
@@ -222,14 +331,17 @@ function Chat.Check()
     if not (cf and mover) then return false end
     if ns.Overhaul.GameEditing() then return false end
     if IsMouseButtonDown and IsMouseButtonDown() then return false end
-    local ok, _, anchor = pcall(cf.GetPoint, cf, 1)
     -- The game puts a window's own remembered text size back at times.
     local size = chosenSize()
     if size then
         local _, current = fontOf(cf)
         if math.abs(current - size) > 0.5 then applyFonts() end
     end
-    if ok and anchor == mover then return false end
+    -- Every point, not the first alone: the game also ADDS a point of its own to the window
+    -- without taking the addon's off, which leaves the first one as it was and the window
+    -- stretched between the two, deaf to its mover.
+    if ns.Overhaul.Fastened(cf, wantedPoints(mover)) then return false end
+    pcall(logIncident, cf)
     placeMain()
     return true
 end
@@ -257,11 +369,24 @@ function Chat.Apply()
     if not Chat.events then
         Chat.events = CreateFrame("Frame")
         Chat.sinceCheck = 0
-        pcall(Chat.events.RegisterEvent, Chat.events, "EDIT_MODE_LAYOUTS_UPDATED")
-        Chat.events:SetScript("OnEvent", function()
-            placeMain()
+        -- The events after which the game has been seen to move the window, or may: the
+        -- last one is kept, to say in the log what came before a move.
+        for _, ev in ipairs({ "EDIT_MODE_LAYOUTS_UPDATED", "PLAYER_LEVEL_UP", "UPDATE_CHAT_WINDOWS", "UPDATE_FLOATING_CHAT_WINDOWS",
+                              "DISPLAY_SIZE_CHANGED", "UI_SCALE_CHANGED", "PLAYER_REGEN_ENABLED" }) do
+            pcall(Chat.events.RegisterEvent, Chat.events, ev)
+        end
+        Chat.events:SetScript("OnEvent", function(_, event)
+            Chat.lastEvent = { name = event, at = time and time() or 0 }
+            if event == "EDIT_MODE_LAYOUTS_UPDATED" then placeMain() end
             Chat.sinceCheck = 1
         end)
+        -- Anything that fastens the window anywhere is looked at on the next frame.
+        local main = frame("ChatFrame1")
+        if hooksecurefunc and main then
+            pcall(hooksecurefunc, main, "SetPoint", function()
+                if not placing then Chat.sinceCheck = 1 end
+            end)
+        end
         Chat.events:SetScript("OnUpdate", function(_, dt)
             Chat.sinceCheck = Chat.sinceCheck + (type(dt) == "number" and dt or 0)
             if Chat.sinceCheck < 1 then return end

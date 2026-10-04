@@ -16,6 +16,10 @@
     quest tracker). /mint uidump menus records the game menu and the windows it opens
     instead: open the game menu and each of those windows once first, so that they exist.
     /mint uidump bags records the bag windows: have your bags open when you type it.
+    /mint uidump cast records the cast bars and the game's buff frame.
+    /mint uidump chat records the chat windows, and with them every point the main window
+    is fastened by, its size and place, and what the game had done to it each time the addon
+    had to put it back on its mover. Type it while the window is misbehaving, before a reload.
 ]]
 
 local ADDON, ns = ...
@@ -61,7 +65,18 @@ local BAG_ROOTS = {
     { "BagItemSearchBox", 1 }, { "BagItemAutoSortButton", 1 }, { "BackpackTokenFrame", 2 }, { "ContainerFrame1MoneyFrame", 1 },
     { "BankFrame", 2 }, { "MerchantFrame", 1 },
 }
-local GROUPS = { menus = MENU_ROOTS, bags = BAG_ROOTS }
+-- /mint uidump cast: the cast bars.
+local CAST_ROOTS = {
+    { "PlayerCastingBarFrame", 3 }, { "CastingBarFrame", 3 }, { "TargetFrameSpellBar", 3 }, { "FocusFrameSpellBar", 2 },
+    { "PetCastingBarFrame", 2 }, { "UIParentBottomManagedFrameContainer", 1 }, { "BuffFrame", 2 }, { "DebuffFrame", 2 },
+}
+-- /mint uidump chat: the chat windows, their tabs and what holds them.
+local CHAT_ROOTS = {
+    { "ChatFrame1", 2 }, { "ChatFrame2", 1 }, { "ChatFrame3", 0 }, { "ChatFrame1Tab", 0 }, { "ChatFrame2Tab", 0 },
+    { "ChatFrame1EditBox", 0 }, { "ChatFrame1ButtonFrame", 1 }, { "GeneralDockManager", 2 }, { "MintCommunityToolsMover_chat", 0 },
+    { "EditModeManagerFrame", 0 }, { "CombatLogQuickButtonFrame_Custom", 0 },
+}
+local GROUPS = { menus = MENU_ROOTS, bags = BAG_ROOTS, cast = CAST_ROOTS, chat = CHAT_ROOTS }
 
 -- Functions and tables the overhaul would like to use.
 local APIS = {
@@ -246,6 +261,11 @@ function Dump.Run(group)
     do
         local ok, bags = pcall(bagInfo)
         out.bags = ok and bags or { error = tostring(bags) }
+    end
+    -- The chat window's place, in full: every dump has it.
+    if ns.Chat and ns.Chat.Facts then
+        local ok, chat = pcall(ns.Chat.Facts)
+        out.chat = ok and chat or { error = tostring(chat) }
     end
     if ns.Quests then
         out.quests = { source = ns.Quests.Source() or "none", hidden = ns.Quests.hidden }

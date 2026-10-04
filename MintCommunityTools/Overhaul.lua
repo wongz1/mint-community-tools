@@ -9,6 +9,7 @@
       Quests.lua       the tracked quests and their objectives, as a plain list
       Menus.lua        the game menu (Escape) and the windows it opens
       Bags.lua         the bag windows
+      CastBars.lua     the cast bars
     Each piece can be turned off on its own, and the whole overhaul can (Settings tab,
     /mint ui on|off). Off is the default until it has been tried on the real client.
 
@@ -23,9 +24,21 @@
     game's, which steps aside while Shift is held: the game's button and what it runs are
     not touched.
 
-    What the game's own frames look like can only be changed once per session: turning a
-    piece off (or the overhaul) takes a /reload to undo. The Settings tab says so and offers
-    the reload. Everything here is feature-detected and run under pcall: the WoW Forever
+    The game menu also gets a button of the addon's own, "Mint Edit Mode", at its bottom. It
+    is not one of the menu's buttons: the menu makes those itself, and a button an addon
+    adds to that list is known to break the ones that run the game's protected code (Log
+    Out, Edit Mode). It is a strip of the addon's hung under the menu, drawn to look like
+    the menu carrying on, shown and hidden with it.
+
+    Every switch takes effect when it is flipped, where it can. Turning the overhaul or any
+    piece ON sets it up there and then (after combat, when in it). Turning a piece OFF is
+    done at once for the pieces that only restyle the game's frames or add a frame of the
+    addon's (the quest tracker, the game menu, the bag windows, the cast bars): each has an
+    Unapply that puts back exactly what its Apply changed. The pieces that take the game's
+    frames apart and rebuild them (action bars, chat, unit frames, minimap) have none: the
+    game's own layout of those cannot be put back piece by piece, so turning one of those
+    off, alone or with the whole overhaul, is finished by a /reload. The Settings tab says
+    which and offers the reload. Everything here is feature-detected and run under pcall: the WoW Forever
     client is a beta, and a frame that is not there must cost a piece, never the addon.
 ]]
 
@@ -38,7 +51,8 @@ local pairs, ipairs, type, tostring, pcall = pairs, ipairs, type, tostring, pcal
 O.DEFAULTS = {
     enabled = false,
     menuEdit = true,     -- the game menu's Edit Mode button opens this UI's edit mode
-    bars = { enabled = true, size = 32, spacing = 2, hideMicro = false, extraBags = true },
+    menuButton = true,   -- a Mint Edit Mode button at the bottom of the game menu
+    bars = { enabled = true, size = 32, spacing = 2, hideMicro = false, extraBags = true, xpClassColor = true, xpWidth = 0, xpHeight = 0 },
     -- fontSize 0 and font "default" mean: as the game has them
     chat = { enabled = true, background = true, width = 400, height = 180, fontSize = 0, font = "default" },
     units = {
@@ -52,6 +66,8 @@ O.DEFAULTS = {
     quests = { enabled = true, levels = true, background = false, collapsed = false, width = 250, maxHeight = 420 },
     menus = { enabled = true },
     bags = { enabled = true },
+    -- width, height and fontSize 0 mean: as the game has them
+    cast = { enabled = true, width = 0, height = 0, fontSize = 0, textX = 0, textY = 0 },
     positions = {},
 }
 
@@ -104,6 +120,46 @@ end
 
 -- Is the game's own edit mode open? It is moving its frames about then, and the pieces that
 -- keep a frame of the game's on a mover leave it alone until it closes.
+--- Is `f` fastened exactly as `wanted` says: those points ({ point, to, toPoint, x, y } each)
+--- and no others? The game adds a point of its own to a frame at times without taking the
+--- others off. The first point then still looks right, while the frame is stretched between
+--- the addon's points and the game's and no longer follows its mover.
+function O.Fastened(f, wanted)
+    if type(f) ~= "table" or type(f.GetPoint) ~= "function" then return false end
+    local n
+    if type(f.GetNumPoints) == "function" then
+        local ok, count = pcall(f.GetNumPoints, f)
+        if ok and type(count) == "number" then n = count end
+    end
+    if n and n ~= #wanted then return false end
+    local have = {}
+    for i = 1, n or #wanted do
+        local ok, point, to, toPoint, x, y = pcall(f.GetPoint, f, i)
+        if not ok or type(point) ~= "string" then return false end
+        have[point] = { to, toPoint, x, y }
+    end
+    for _, want in ipairs(wanted) do
+        local h = have[want[1]]
+        if not h or h[1] ~= want[2] or h[2] ~= want[3] then return false end
+        local x, y = h[3], h[4]
+        if not (issecretvalue and (issecretvalue(x) or issecretvalue(y))) then
+            if type(x) ~= "number" or type(y) ~= "number" then return false end
+            if math.abs(x - want[4]) > 0.5 or math.abs(y - want[5]) > 0.5 then return false end
+        end
+    end
+    return true
+end
+
+--- The parts of the addon that this session has not loaded. A file added by an update is
+--- only read when the game starts: a /reload does not pick it up.
+function O.MissingParts()
+    local out = {}
+    for _, piece in ipairs(O.PIECES or {}) do
+        if not ns[piece.module] then out[#out + 1] = piece.label end
+    end
+    return out
+end
+
 function O.GameEditing()
     local manager = _G.EditModeManagerFrame
     if type(manager) ~= "table" then return false end
@@ -147,11 +203,29 @@ pcall(function()
     })
 end)
 
-function O.HideBlizzard(frame)
+-- frame -> the parent it had before it was hidden, for giving it back
+local taken = setmetatable({}, { __mode = "k" })
+
+-- Hides a frame of the game's under the hidden parent. Its events are cut off unless
+-- `keepEvents`: a frame that may be given back later (O.ShowBlizzard) has to stay alive.
+function O.HideBlizzard(frame, keepEvents)
     if type(frame) ~= "table" then return false end
-    pcall(frame.UnregisterAllEvents, frame)
+    if not keepEvents then pcall(frame.UnregisterAllEvents, frame) end
+    if taken[frame] == nil and type(frame.GetParent) == "function" then
+        local ok, parent = pcall(frame.GetParent, frame)
+        if ok and type(parent) == "table" and parent ~= hider then taken[frame] = parent end
+    end
     pcall(frame.Hide, frame)
     pcall(frame.SetParent, frame, hider)
+    return true
+end
+
+-- Gives a frame hidden with its events kept back to the game: under the parent it had, shown.
+function O.ShowBlizzard(frame)
+    if type(frame) ~= "table" then return false end
+    local parent = taken[frame]
+    pcall(frame.SetParent, frame, type(parent) == "table" and parent or UIParent)
+    pcall(frame.Show, frame)
     return true
 end
 
@@ -211,6 +285,7 @@ end
 
 local function paint(mover)
     local W = ns.W
+    if mover.off == true then return end   -- its piece is turned off: no box in edit mode
     if editing then
         mover:SetAlpha(1)
         mover:EnableMouse(true)
@@ -259,12 +334,23 @@ function O.Mover(key, label, width, height, default)
     end
     mover.default = default or mover.default
     mover.label = label
+    mover.off = false
     mover.text:SetText(label)
     mover:SetSize(width, height)
     place(mover)
     paint(mover)
     mover:Show()
     return mover
+end
+
+-- Puts a mover away: its piece has been turned off, and there is nothing on it to move. The
+-- next O.Mover call for it brings it back.
+function O.HideMover(key)
+    local mover = movers[key]
+    if not mover then return false end
+    mover.off = true
+    mover:Hide()
+    return true
 end
 
 function O.ResetPosition(key)
@@ -417,15 +503,62 @@ function O.PlaceMenuCatch()
     return true
 end
 
+-- The addon's own button under the game menu: "Mint Edit Mode".
+local menuStrip
+
+local function buildMenuStrip()
+    local W = ns.W
+    menuStrip = W.panel(UIParent, { 0.06, 0.06, 0.06, 0.95 })   -- as the flat game menu is
+    menuStrip.button = W.button(menuStrip, "MintCommunityToolsMenuEditButton", "Mint Edit Mode", 200, function()
+        local menu = _G.GameMenuFrame
+        if type(HideUIPanel) == "function" then pcall(HideUIPanel, menu) else pcall(menu.Hide, menu) end
+        O.SetEdit(true)
+    end)
+    menuStrip.button:SetHeight(36)   -- the height of the menu's own buttons
+    pcall(menuStrip.button.SetNormalFontObject, menuStrip.button, "GameFontHighlight")
+    menuStrip.button:SetPoint("TOP", menuStrip, "TOP", 0, -10)
+end
+
+-- Hangs the strip under the game menu, or puts it away: when the overhaul or this setting is
+-- off, or the menu is closed.
+function O.PlaceMenuButton()
+    local menu = _G.GameMenuFrame
+    local wanted = O.Active() and O.Settings().menuButton and type(menu) == "table"
+    local shown = false
+    if wanted and type(menu.IsShown) == "function" then
+        local ok, s = pcall(menu.IsShown, menu)
+        shown = ok and s == true
+    end
+    if not (wanted and shown) then
+        if menuStrip then menuStrip:Hide() end
+        return false
+    end
+    if not menuStrip then buildMenuStrip() end
+    -- From the menu's bottom edge down, over its bottom border, so the two read as one panel.
+    menuStrip:ClearAllPoints()
+    menuStrip:SetPoint("TOPLEFT", menu, "BOTTOMLEFT", 0, 1)
+    menuStrip:SetPoint("TOPRIGHT", menu, "BOTTOMRIGHT", 0, 1)
+    menuStrip:SetHeight(10 + 36 + 10)
+    local okStrata, strata = pcall(menu.GetFrameStrata, menu)
+    if okStrata and type(strata) == "string" then menuStrip:SetFrameStrata(strata) end
+    menuStrip:Show()
+    return true
+end
+
+local function placeMenuThings()
+    O.PlaceMenuCatch()
+    O.PlaceMenuButton()
+end
+
 -- The menu is watched, not changed: its buttons are made when it opens.
 local function hookGameMenu()
     local menu = _G.GameMenuFrame
     if menuHooked or type(menu) ~= "table" or type(menu.HookScript) ~= "function" then return end
     menuHooked = true
-    pcall(menu.HookScript, menu, "OnShow", function() O.PlaceMenuCatch() end)
-    pcall(menu.HookScript, menu, "OnHide", function() O.PlaceMenuCatch() end)
+    pcall(menu.HookScript, menu, "OnShow", placeMenuThings)
+    pcall(menu.HookScript, menu, "OnHide", placeMenuThings)
     if hooksecurefunc and type(menu.InitButtons) == "function" then
-        pcall(hooksecurefunc, menu, "InitButtons", function() O.PlaceMenuCatch() end)
+        pcall(hooksecurefunc, menu, "InitButtons", placeMenuThings)
     end
 end
 
@@ -444,6 +577,7 @@ local PIECES = {
     { key = "quests", module = "Quests", label = "quest tracker" },
     { key = "menus", module = "Menus", label = "game menu" },
     { key = "bags", module = "Bags", label = "bag windows" },
+    { key = "cast", module = "CastBars", label = "cast bars" },
 }
 O.PIECES = PIECES
 
@@ -460,17 +594,72 @@ end
 
 -- Called at login. A piece is applied once per session; a piece turned on later needs a
 -- reload, and so does turning one off.
-function O.Apply()
-    if not O.Active() then return end
+-- A piece that can be taken off again without a reload has an Unapply.
+local function unapplyPiece(piece)
+    local m = ns[piece.module]
+    if not (m and m.Unapply) then return false end
+    local ok, err = pcall(m.Unapply)
+    if ok then
+        O.applied[piece.key] = nil
+        return true
+    end
+    ns.Say(("the %s could not be turned off: %s"):format(piece.label, tostring(err)))
+    return false
+end
+
+-- Does switching this setting OFF need a reload to finish? True for a piece that has no
+-- Unapply, and for the overhaul's own switch (which turns those pieces off with the rest).
+-- The Settings tab marks these switches.
+function O.OffNeedsReload(path)
+    if path == "enabled" then return true end
+    local key = type(path) == "string" and path:match("^(%w+)%.enabled$")
+    if not key then return false end
+    for _, piece in ipairs(PIECES) do
+        if piece.key == key then
+            local m = ns[piece.module]
+            return not (m and m.Unapply)
+        end
+    end
+    return false
+end
+
+-- The pieces that are set up but switched off and cannot be taken off without a reload.
+function O.ReloadPieces()
+    local out = {}
+    for _, piece in ipairs(PIECES) do
+        local m = ns[piece.module]
+        if O.applied[piece.key] and not O.Active(piece.key) and not (m and m.Unapply) then out[#out + 1] = piece.label end
+    end
+    return out
+end
+
+-- Brings what is set up into line with the settings: a piece that is wanted and not set up
+-- is set up; one that is set up and not wanted is taken off when it can be. Not in combat
+-- (frames the game protects cannot be made or moved then): it is done when combat ends.
+function O.Sync()
     if inCombat() then
-        ns.Say("logged in during combat: the UI overhaul will be set up when it ends.")
         O.pendingApply = true
-        return
+        O.needsReload = #O.ReloadPieces() > 0
+        return false
     end
     for _, piece in ipairs(PIECES) do
-        if O.Active(piece.key) and not O.applied[piece.key] then applyPiece(piece) end
+        local want = O.Active(piece.key)
+        if want and not O.applied[piece.key] then
+            applyPiece(piece)
+        elseif not want and O.applied[piece.key] then
+            unapplyPiece(piece)
+        end
     end
-    hookGameMenu()
+    if O.Active() then hookGameMenu() end
+    O.needsReload = #O.ReloadPieces() > 0
+    return true
+end
+
+-- Called at login.
+function O.Apply()
+    if not O.Active() then return end
+    if inCombat() then ns.Say("logged in during combat: the UI overhaul will be set up when it ends.") end
+    O.Sync()
 end
 
 -- Called when combat ends: a login that happened in combat is set up now, and each piece is
@@ -478,7 +667,8 @@ end
 function O.OnCombatEnd()
     if O.pendingApply then
         O.pendingApply = nil
-        O.Apply()
+        O.Sync()
+        if ns.SettingsUI then ns.SettingsUI.Refresh() end
     end
     for _, piece in ipairs(O.PIECES) do
         local m = ns[piece.module]
@@ -498,17 +688,15 @@ end
 -- A setting changed. Pieces that can follow live do; the rest are noted for a reload.
 function O.Changed(path)
     local s = O.Settings()
-    if path == "enabled" or path:match("%.enabled$") then
-        -- Turning the overhaul or a piece on when it was not applied this session, or off
-        -- when it was: a reload either way.
-        O.needsReload = true
-    end
+    -- The overhaul or a piece switched on or off: done now, where it can be.
+    if path == "enabled" or path:match("%.enabled$") then O.Sync() end
     for _, piece in ipairs(PIECES) do
         local m = ns[piece.module]
         if O.applied[piece.key] and m and m.OnSettingsChanged then pcall(m.OnSettingsChanged, path) end
     end
     if not s.enabled and editing then O.SetEdit(false) end
     if path == "menuEdit" or path == "enabled" then O.PlaceMenuCatch() end
+    if path == "menuButton" or path == "enabled" then O.PlaceMenuButton() end
 end
 
 -- /mint ui [on|off]
@@ -517,7 +705,15 @@ function O.Command(arg)
     if arg == "on" or arg == "off" then
         s.enabled = arg == "on"
         O.Changed("enabled")
-        ns.Say(("the UI overhaul is %s. Type /reload to apply it%s."):format(arg, arg == "on" and ", then /mint edit to arrange it" or ""))
+        if O.pendingApply then
+            ns.Say(("the UI overhaul is %s; that will be done when combat ends."):format(arg))
+        elseif arg == "on" then
+            ns.Say("the UI overhaul is on. /mint edit to arrange it.")
+        elseif O.needsReload then
+            ns.Say(("the UI overhaul is off. Type /reload to finish: the game's own %s come back at a reload."):format(table.concat(O.ReloadPieces(), ", ")))
+        else
+            ns.Say("the UI overhaul is off.")
+        end
     elseif arg == "reset" then
         O.ResetPositions()
     else

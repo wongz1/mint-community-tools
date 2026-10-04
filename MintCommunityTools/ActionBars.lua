@@ -429,11 +429,6 @@ local function placeMicro()
     local buttons = microButtons()
     if #buttons == 0 then return end
     local s = settings()
-    if s.hideMicro then
-        for _, b in ipairs(buttons) do ns.Overhaul.HideBlizzard(b) end
-        if microBar then microBar:Hide() end
-        return
-    end
     local w, h, pad = 24, 30, 2
     local mover = ns.Overhaul.Mover("micro", "Micro menu", #buttons * (w + 1) - 1 + 2 * pad, h + 2 * pad, { "BOTTOMRIGHT", -20, 72 })
     if not microBar then
@@ -444,7 +439,9 @@ local function placeMicro()
     microBar:ClearAllPoints()
     microBar:SetPoint("TOPLEFT", mover, "TOPLEFT", 0, 0)
     microBar:SetPoint("BOTTOMRIGHT", mover, "BOTTOMRIGHT", 0, 0)
-    microBar:Show()
+    -- Hidden by hiding the strip the buttons sit on, so that it can be shown again at once:
+    -- the buttons stay the strip's, and stay as the game keeps them.
+    if s.hideMicro then microBar:Hide() else microBar:Show() end
     for i, b in ipairs(buttons) do
         skinMicro(b)
         pcall(b.SetParent, b, microBar)
@@ -520,16 +517,36 @@ local function watchedFaction()
     return nil
 end
 
+-- The experience bar's colour: your class colour, or the game's own purple when the settings
+-- say not to.
+local XP_PURPLE = { 0.58, 0.0, 0.55, 1 }
+local function xpColor()
+    if settings().xpClassColor == false then return XP_PURPLE end
+    return { ns.W.accent() }
+end
+
+-- The experience bar's size: what the settings choose, or (0, or anything too small to be a
+-- size) as wide as a bar of twelve buttons and 8 tall.
+Bars.LIMITS = { xpWidth = { 100, 1200, 10 }, xpHeight = { 4, 40, 1 } }
+function Bars.ExperienceSize()
+    local s = settings()
+    local L = Bars.LIMITS
+    local w, h = tonumber(s.xpWidth) or 0, tonumber(s.xpHeight) or 0
+    if w < L.xpWidth[1] then w = 12 * (s.size + s.spacing) - s.spacing elseif w > L.xpWidth[2] then w = L.xpWidth[2] end
+    if h < L.xpHeight[1] then h = 8 elseif h > L.xpHeight[2] then h = L.xpHeight[2] end
+    return w, h
+end
+
 function Bars.ExperienceState()
     local W = ns.W
     local cur = UnitXP and UnitXP("player")
     local maxv = UnitXPMax and UnitXPMax("player")
-    if isSecret(cur) or isSecret(maxv) then return "xp", cur, maxv, nil, "Experience", { W.accent() } end
+    if isSecret(cur) or isSecret(maxv) then return "xp", cur, maxv, nil, "Experience", xpColor() end
     if type(cur) == "number" and type(maxv) == "number" and maxv > 0 then
         if not atLevelCap() then
             local rested = GetXPExhaustion and GetXPExhaustion()
             if type(rested) ~= "number" or isSecret(rested) then rested = nil end
-            return "xp", cur, maxv, rested, "Experience", { W.accent() }
+            return "xp", cur, maxv, rested, "Experience", xpColor()
         end
     end
     local name, standing, low, high, value = watchedFaction()
@@ -596,9 +613,8 @@ local function buildExperience()
         end
     end
 
-    local s = settings()
-    local width = 12 * (s.size + s.spacing) - s.spacing
-    local mover = ns.Overhaul.Mover("xp", "Experience bar", width, 8, { "BOTTOM", 0, 24 })
+    local width, height = Bars.ExperienceSize()
+    local mover = ns.Overhaul.Mover("xp", "Experience bar", width, height, { "BOTTOM", 0, 24 })
     if not xp.frame then
         xp.frame = W.safeCreate("Frame", "MintCommunityToolsExperienceBar", UIParent, W.template())
         xp.frame:SetFrameStrata("LOW")
@@ -711,7 +727,13 @@ end
 -- Has the game pulled this button off the frame the addon anchored it to?
 local function strayed(b, anchor)
     local ok, _, relativeTo = pcall(b.GetPoint, b, 1)
-    return ok and relativeTo ~= anchor
+    if ok and relativeTo ~= anchor then return true end
+    -- A point of the game's own, added to the addon's one, pulls the button as surely.
+    if type(b.GetNumPoints) == "function" then
+        local okN, n = pcall(b.GetNumPoints, b)
+        if okN and type(n) == "number" and n > 1 then return true end
+    end
+    return false
 end
 
 -- The game lays its own bars out again whenever it sees fit (a bag changes, its edit mode
@@ -744,7 +766,7 @@ function Bars.Check()
         end
         if settings().extraBags then pcall(dressExtraBags) end
     end
-    if microBar and not settings().hideMicro then
+    if microBar then
         for _, b in ipairs(microButtons()) do
             if strayed(b, microBar) then
                 pcall(placeMicro)
@@ -774,6 +796,12 @@ function Bars.OnEnteringWorld()
 end
 
 function Bars.OnSettingsChanged(path)
-    if path == "bars.hideMicro" and not settings().hideMicro then pcall(placeMicro) end
+    if path == "bars.hideMicro" then pcall(placeMicro) end
     if path == "bars.extraBags" then pcall(layoutBags) end
+    if path == "bars.xpClassColor" then refreshExperience() end
+    -- the bar is fastened to its mover by two corners: it takes the mover's size
+    if (path == "bars.xpWidth" or path == "bars.xpHeight") and xp.frame then
+        local width, height = Bars.ExperienceSize()
+        ns.Overhaul.Mover("xp", "Experience bar", width, height, { "BOTTOM", 0, 24 })
+    end
 end

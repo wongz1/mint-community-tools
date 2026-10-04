@@ -38,7 +38,7 @@ ROOT = Path(__file__).resolve().parent.parent
 ADDON_DIR = ROOT / "MintCommunityTools"
 # The .toc's load order, without Saved.lua (a link to the game's save file; absent here).
 FILES = ["Encode.lua", "Collect.lua", "Loot.lua", "UI.lua", "LootUI.lua", "Minimap.lua",
-         "Overhaul.lua", "ActionBars.lua", "Chat.lua", "UnitFrames.lua", "Map.lua", "Quests.lua", "Menus.lua", "Bags.lua", "SettingsUI.lua", "Dump.lua", "Core.lua"]
+         "Overhaul.lua", "ActionBars.lua", "Chat.lua", "UnitFrames.lua", "Map.lua", "Quests.lua", "Menus.lua", "Bags.lua", "CastBars.lua", "SettingsUI.lua", "Dump.lua", "Core.lua"]
 VARIANTS = ["forever", "classic", "mainline"]
 VERBOSE = "-v" in sys.argv
 # --write-fixtures saves the export strings the addon actually produced, for the website's
@@ -95,15 +95,27 @@ local function stub(name, template)
         local by = rawget(self, "_pointsBy") or {}
         by[pt[1]] = pt
         rawset(self, "_pointsBy", by)
+        -- As the game keeps them: a list, in the order they were set. Setting a point the
+        -- frame already has replaces that one; any other is ADDED to those it has, which
+        -- stay until ClearAllPoints.
+        local list = rawget(self, "_points") or {}
+        local at = #list + 1
+        for i, have in ipairs(list) do if have[1] == pt[1] then at = i end end
+        list[at] = pt
+        rawset(self, "_points", list)
         return
       end
+      if k == "ClearAllPoints" then rawset(self, "_points", {}); return end
+      if k == "GetNumPoints" then return #(rawget(self, "_points") or {}) end
       if k == "SetTexture" then rawset(self, "_texture", (...)); return end
       if k == "SetTextColor" then rawset(self, "_textColor", { ... }); return end
       if k == "SetUnit" then rawset(self, "_unit", (...)); return end
       if k == "SetFont" then rawset(self, "_font", { ... }); return end
       if k == "SetColorTexture" then rawset(self, "_colorTexture", { ... }); return end
       if k == "SetTexCoord" then rawset(self, "_texCoord", { ... }); return end
+      if k == "SetStatusBarTexture" then rawset(self, "_barTexture", (...)); return end
       if k == "SetWidth" then rawset(self, "_width", (...)); return end
+      if k == "SetHeight" then rawset(self, "_height", (...)); return end
       if k == "SetWordWrap" then rawset(self, "_wrap", (...) and true or false); return end
       -- a font string with a width says how tall its wrapped text is: 12 a line, about 5.6 a letter
       if k == "GetStringHeight" then
@@ -140,7 +152,7 @@ local function stub(name, template)
       if k == "GetName" then return rawget(self, "_name") end
       if k == "RemoveMaskTexture" then rawset(self, "_maskRemoved", (...)); return end
       if k == "SetDrawLayer" then rawset(self, "_layer", (...)); return end
-      if k == "GetPoint" then local p = rawget(self, "_point"); if p then return unpack(p) end; return nil end
+      if k == "GetPoint" then local p = (rawget(self, "_points") or {})[(...) or 1]; if p then return unpack(p) end; return nil end
       if k == "GetParent" then return rawget(self, "_parent") end
       if k == "SetBackdrop" then rawset(self, "_backdrop", (...)); return end
       if k == "Show" then rawset(self, "_shown", true); local s = rawget(self, "_scripts"); if s.OnShow then s.OnShow(self) end; return end
@@ -425,6 +437,24 @@ do
   POP.button = holding(typed(stub(), "Button"), { POP.buttonArt })
   rawset(POP.frame, "ButtonContainer", holding(typed(stub(), "Frame"), {}, { POP.button }))
   holding(POP.frame, { POP.alert }, {})
+
+  -- the player's cast bar: a status bar with its art in parts, its text in a box under it,
+  -- and a word for what it is doing (barType) that the game sets before the fill's picture
+  local CAST = {}
+  MENU.cast = CAST
+  CAST.bar = typed(named("PlayerCastingBarFrame"), "StatusBar")
+  CAST.border, CAST.textBox, CAST.background, CAST.text = art(), art(), art(), words()
+  rawset(CAST.bar, "Border", CAST.border); rawset(CAST.bar, "TextBorder", CAST.textBox)
+  rawset(CAST.bar, "Background", CAST.background); rawset(CAST.bar, "Text", CAST.text)
+  rawset(CAST.bar, "barType", "standard")
+  rawset(CAST.bar, "GetWidth", function(self) return rawget(self, "_width") or 208 end)
+  rawset(CAST.bar, "GetHeight", function(self) return rawget(self, "_height") or 11 end)
+  rawset(CAST.text, "GetFont", function(self)
+    local f = rawget(self, "_font")
+    if f then return f[1], f[2], f[3] end
+    return "Fonts\\FRIZQT__.TTF", 10, ""
+  end)
+  holding(CAST.bar, { CAST.border, CAST.textBox, CAST.background, CAST.text })
 
   -- the combined backpack: a window like the others, with item slots in it. A slot is a
   -- button with a picture (icon), the art of an empty slot behind it, and a frame the game
@@ -1457,6 +1487,57 @@ if S.enabled then
     assert(pf.model._shown == false and pf.portrait._shown, "back to the flat picture")
   end
 
+  -- A switch takes effect when it is flipped, not at the next reload or the next time the
+  -- game says something changed: class colours on health bars, and hiding the micro menu.
+  do
+    local sui = ns.settingsui
+    local function flip(path, on)
+      local box = sui.checks[path]
+      rawset(box, "_checked", on)
+      box._scripts.OnClick(box)
+    end
+    local function health(f) local c = f.health._color; return math.floor(c[1] * 100 + 0.5) .. "," .. math.floor(c[2] * 100 + 0.5) .. "," .. math.floor(c[3] * 100 + 0.5) end
+    assert(S.units.classColor == true and health(pf) == "78,61,43", "the player's health bar is in the class colour")
+    flip("units.classColor", false)
+    assert(health(pf) == "100,0,0", "class colours off: the bar is the reaction colour at once, with no health event: " .. health(pf))
+    assert(ns.Overhaul.needsReload == false, "and no reload is asked for")
+    flip("units.classColor", true)
+    assert(health(pf) == "78,61,43", "and back at once")
+    -- the micro menu: hidden and shown again at once, its buttons still on their strip
+    local microBar = frameNamed("MintCommunityToolsMicroBar")
+    assert(microBar._shown and S.bars.hideMicro == false, "the micro menu shows by default")
+    flip("bars.hideMicro", true)
+    assert(microBar._shown == false and env.CharacterMicroButton._parent == microBar and ns.Overhaul.needsReload == false, "hidden at once, by hiding the strip its buttons sit on")
+    assert(ns.Bars.Check() == 0, "and nothing is put back while it is hidden")
+    flip("bars.hideMicro", false)
+    assert(microBar._shown and env.CharacterMicroButton._parent == microBar, "shown again at once")
+    -- Every switch on every page works at once, except turning OFF one of the four pieces that
+    -- take the game's frames apart (or the whole overhaul while one of those is set up): only
+    -- those ask for a reload, and flipping the switch back takes the request away again.
+    local RELOAD = { ["enabled"] = true, ["bars.enabled"] = true, ["chat.enabled"] = true, ["units.enabled"] = true, ["map.enabled"] = true }
+    local n, tagged = 0, 0
+    for path, box in pairs(sui.checks) do
+      n = n + 1
+      local was = ns.SettingsUI.Get(path)
+      assert(ns.Overhaul.needsReload == false, path .. ": nothing is waiting on a reload beforehand")
+      flip(path, not was)
+      assert(ns.Overhaul.needsReload == (RELOAD[path] == true), path .. ": asks for a reload: " .. tostring(ns.Overhaul.needsReload))
+      -- ...and the switch says so in its own label, exactly when that is true
+      local says = box.label:GetText():find(ns.SettingsUI.RELOAD_TAG, 1, true) ~= nil
+      assert(says == ns.Overhaul.needsReload and box.reloadTag == says, path .. ": its label says a reload is needed exactly when one is: " .. box.label:GetText())
+      if says then tagged = tagged + 1 end
+      flip(path, was)
+      assert(ns.Overhaul.needsReload == false, path .. ": flipped back, no reload is wanted")
+    end
+    assert(n == 28, "every switch was flipped: " .. n)
+    assert(tagged == 5 and ns.SettingsUI.RELOAD_TAG == "(turning off needs a reload)", "five switches are marked: " .. tagged)
+    assert(sui.checks["bars.enabled"].label:GetText():find("|cff8c8c8c(turning off needs a reload)|r", 1, true), "the mark is dimmed, after the label")
+    for _, piece in ipairs(ns.Overhaul.PIECES) do
+      assert(ns.Overhaul.applied[piece.key] == true, piece.key .. " is set up again after being switched off and on")
+    end
+    assert(sui.status:GetText():find("is on", 1, true), "and the Settings tab says all is well: " .. sui.status:GetText())
+  end
+
   -- Sizes, fonts, the aura icons' sizes and their countdown numbers: the Unit frames page.
   do
     local sui = ns.settingsui
@@ -1597,6 +1678,71 @@ if S.enabled then
     assert(C.Check() == true and onMover(), "put back once the mouse is let go")
     env.EditModeManagerFrame, env.IsMouseButtonDown = nil, nil
 
+    -- What a level-up did in the game: a point of the game's own ADDED to the window, the
+    -- addon's two left on. The first point still names the mover, the window is stretched
+    -- between the mover and the game's point, and dragging the mover no longer moves it.
+    do
+      local cf, O = env.ChatFrame1, ns.Overhaul
+      local function two() return { { "TOPLEFT", mover("chat"), "TOPLEFT", 4, -4 }, { "BOTTOMRIGHT", mover("chat"), "BOTTOMRIGHT", -4, 4 } } end
+      assert(cf:GetNumPoints() == 2 and O.Fastened(cf, two()), "the window is held by two points, both on its mover")
+      env.MintCommunityToolsDB.chatLog = nil
+      fire("PLAYER_LEVEL_UP")
+      tick(0.01)
+      assert(cf:GetNumPoints() == 2 and env.MintCommunityToolsDB.chatLog == nil, "a level-up by itself moves nothing and logs nothing")
+      C.sinceCheck = 0
+      cf:SetPoint("BOTTOMLEFT", env.UIParent, "BOTTOMLEFT", 32, 95)
+      assert(cf:GetNumPoints() == 3 and select(2, cf:GetPoint(1)) == mover("chat"), "the game's point is a third; the first still names the mover")
+      assert(not O.Fastened(cf, two()), "which is not how the addon fastened it")
+      assert(C.sinceCheck >= 1, "anything fastening the window is looked at on the next frame, not a second later")
+      tick(0.01)
+      assert(cf:GetNumPoints() == 2 and O.Fastened(cf, two()), "back to the addon's two points and no others")
+      assert(C.sinceCheck < 1, "the addon's own placing does not ask for another look")
+      local log = env.MintCommunityToolsDB.chatLog
+      assert(type(log) == "table" and #log == 1, "what the game had done is written down")
+      assert(log[1].points:find("BOTTOMLEFT > UIParent BOTTOMLEFT 32,95", 1, true) and log[1].points:find("TOPLEFT > MintCommunityToolsMover_chat TOPLEFT 4,-4", 1, true),
+        "every point it had: " .. log[1].points)
+      assert(log[1].after == "PLAYER_LEVEL_UP" and type(log[1].ago) == "number" and log[1].combat == false, "and what came before: " .. tostring(log[1].after))
+      -- the right two points at the wrong offsets, or one of the two gone
+      cf:SetPoint("BOTTOMRIGHT", mover("chat"), "BOTTOMRIGHT", -60, 80)
+      assert(C.Check() == true and O.Fastened(cf, two()), "a point of the addon's moved by the game is put back")
+      cf:ClearAllPoints()
+      cf:SetPoint("TOPLEFT", mover("chat"), "TOPLEFT", 4, -4)
+      assert(C.Check() == true and cf:GetNumPoints() == 2, "and so is one taken off")
+      assert(C.Check() == false and #env.MintCommunityToolsDB.chatLog == 3, "then there is nothing to do; three moves in the log")
+      for i = 1, 20 do takeAway(); C.Check() end
+      assert(#env.MintCommunityToolsDB.chatLog == C.LOG_MOST, "the log keeps the last " .. C.LOG_MOST)
+      -- a window the game's edit mode looks after keeps its plain SetPoint beside the game's
+      -- own: the addon uses the plain one
+      local based, viaGame = 0, cf.SetPoint
+      rawset(cf, "SetPointBase", function(self, ...) based = based + 1; return viaGame(self, ...) end)
+      takeAway()
+      assert(C.Check() == true and based == 2 and O.Fastened(cf, two()), "placed with the plain SetPoint where there is one: " .. based)
+      rawset(cf, "SetPointBase", nil)
+      -- the box stops where the tabs and the edit box are still on screen
+      local facts = C.Facts()
+      assert(facts.fastened == true and facts.applied == true and facts.window.points:find("BOTTOMRIGHT > MintCommunityToolsMover_chat", 1, true) and type(facts.log) == "table",
+        "the facts for a bug report: " .. tostring(facts.window.points))
+      env.MintCommunityToolsDB.chatLog = nil
+    end
+
+    -- The same for the other frames kept on a mover: a point added by the game counts.
+    do
+      local O = ns.Overhaul
+      local f, box = stub(), stub()
+      f:SetPoint("CENTER", box, "CENTER", 0, 0)
+      assert(O.Fastened(f, { { "CENTER", box, "CENTER", 0, 0 } }), "one point, as wanted")
+      f:SetPoint("BOTTOM", env.UIParent, "BOTTOM", 0, 120)
+      assert(not O.Fastened(f, { { "CENTER", box, "CENTER", 0, 0 } }), "a second point added: not as wanted")
+      f:ClearAllPoints()
+      assert(not O.Fastened(f, { { "CENTER", box, "CENTER", 0, 0 } }), "nor with no points at all")
+      assert(ns.Bars.Check() == 0, "the action bars' buttons each have their one point: nothing to put back")
+      local b = env.ActionButton1
+      local first = { b:GetPoint(1) }
+      b:SetPoint(first[1] == "CENTER" and "BOTTOM" or "CENTER", env.UIParent, "CENTER", 0, 50)
+      assert(b:GetNumPoints() == 2 and select(2, b:GetPoint(1)) == first[2], "a point added to a button: its first still names the bar's mover")
+      assert(ns.Bars.Check() >= 1 and b:GetNumPoints() == 1 and ns.Bars.Check() == 0, "the bar is laid out again, and then there is nothing to do")
+    end
+
     -- The Chat page: the window's width and height, and the size and font of its text.
     local sui = ns.settingsui
     local ARIAL, FRIZ = "Fonts\\ARIALN.TTF", "Fonts\\FRIZQT__.TTF"
@@ -1640,6 +1786,31 @@ if S.enabled then
     S.chat.fontSize = 14
     ns.Overhaul.Changed("chat.fontSize")
     assert(env.ChatFrame1._font[2] == 14 and ns.Chat.EDIT_ROOM == 30, "and a size of 14 again")
+  end
+
+  -- The experience bar: its colour and its size, on the Bars page.
+  do
+    local sui, B = ns.settingsui, ns.Bars
+    local box = mover("xp")
+    local function step(path, dir) click("MintCommunityToolsSetting" .. (dir > 0 and "More_" or "Less_") .. path:gsub("%.", "_")) end
+    local function says(path) return sui.steppers[path].text:GetText() end
+    assert(sui.checks["bars.xpClassColor"] and frameNamed("MintCommunityToolsSetting_bars_xpClassColor") == sui.checks["bars.xpClassColor"], "the colour switch is on the Bars page")
+    assert(S.bars.xpWidth == 0 and S.bars.xpHeight == 0 and box._size[1] == 406 and box._size[2] == 8, "until chosen: a row of twelve buttons wide, 8 tall")
+    assert(says("bars.xpWidth") == "Width: 406" and says("bars.xpHeight") == "Height: 8", "and the page says so: " .. says("bars.xpWidth"))
+    step("bars.xpWidth", 1); step("bars.xpHeight", 1)
+    assert(S.bars.xpWidth == 416 and S.bars.xpHeight == 9 and box._size[1] == 416 and box._size[2] == 9, "a step each, from the size it had: " .. S.bars.xpWidth .. "x" .. S.bars.xpHeight)
+    assert(says("bars.xpWidth") == "Width: 416" and says("bars.xpHeight") == "Height: 9", "shown at once")
+    step("bars.xpWidth", -1); step("bars.xpWidth", -1)
+    assert(S.bars.xpWidth == 396 and box._size[1] == 396, "narrower than the buttons too")
+    S.bars.xpWidth, S.bars.xpHeight = 5000, 500
+    ns.Overhaul.Changed("bars.xpWidth")
+    assert(box._size[1] == 1200 and box._size[2] == 40, "sizes outside the limits are brought inside them")
+    S.bars.xpHeight = 4
+    step("bars.xpHeight", -1)
+    assert(S.bars.xpHeight == 4 and box._size[2] == 4, "the - button stops at the least")
+    S.bars.xpWidth, S.bars.xpHeight = 0, 0
+    ns.Overhaul.Changed("bars.xpWidth")
+    assert(box._size[1] == 406 and box._size[2] == 8, "and 0 is the size it came with")
   end
 
   -- The quest tracker: the addon's own list of what the game says is tracked.
@@ -1810,6 +1981,42 @@ if S.enabled then
     MENU.frame._hooks.OnHide(MENU.frame)
   end
 
+  -- The game menu also gets a button of the addon's own at its bottom: Mint Edit Mode. It is
+  -- a strip hung under the menu, not one of the menu's buttons.
+  do
+    local O = ns.Overhaul
+    local before = #{ MENU.frame:GetChildren() }
+    MENU.SHOWN = true
+    MENU.frame._hooks.OnShow(MENU.frame)
+    local button = frameNamed("MintCommunityToolsMenuEditButton")
+    local strip = button._pointsBy.TOP[2]
+    assert(button:GetText() == "Mint Edit Mode" and strip._shown, "a Mint Edit Mode button shows with the menu")
+    assert(strip._pointsBy.TOPLEFT[2] == MENU.frame and strip._pointsBy.TOPLEFT[3] == "BOTTOMLEFT" and strip._pointsBy.TOPRIGHT[3] == "BOTTOMRIGHT",
+      "on a strip hung from the menu's bottom edge, as wide as the menu")
+    assert(#{ MENU.frame:GetChildren() } == before and rawget(strip, "_parent") == nil, "it is not one of the menu's own buttons, nor a child of the menu")
+    local hidden = #PANELS_HIDDEN
+    button._scripts.OnClick(button)
+    assert(O.Editing() and #PANELS_HIDDEN == hidden + 1 and PANELS_HIDDEN[#PANELS_HIDDEN] == MENU.frame, "a click closes the menu and opens this UI's edit mode")
+    O.SetEdit(false)
+    MENU.SHOWN = false
+    MENU.frame._hooks.OnHide(MENU.frame)
+    assert(strip._shown == false, "the strip goes when the menu closes")
+    -- its switch, at once
+    MENU.SHOWN = true
+    MENU.frame._hooks.OnShow(MENU.frame)
+    local box = ns.settingsui.checks["menuButton"]
+    rawset(box, "_checked", false)
+    box._scripts.OnClick(box)
+    assert(S.menuButton == false and strip._shown == false and O.needsReload == false, "switched off, at once, without a reload")
+    MENU.frame._hooks.OnShow(MENU.frame)
+    assert(strip._shown == false, "and it stays off when the menu opens")
+    rawset(box, "_checked", true)
+    box._scripts.OnClick(box)
+    assert(strip._shown, "switched on again while the menu is open")
+    MENU.SHOWN = false
+    MENU.frame._hooks.OnHide(MENU.frame)
+  end
+
   -- The game menu and the windows it opens: the art gone, flat panels and buttons in its place.
   do
     local M = ns.Menus
@@ -1881,6 +2088,111 @@ if S.enabled then
     env.MacroFrame = nil   -- the harness's own, not a global the addon made
   end
 
+  -- The cast bar: the game's own bar, flat, on a mover, its fill a plain colour for what it
+  -- is doing.
+  do
+    local C, CAST, WHITE = ns.CastBars, MENU.cast, "Interface\\Buttons\\WHITE8X8"
+    local bar = CAST.bar
+    local function fill() local c = bar._color; return math.floor(c[1] * 100 + 0.5) .. "," .. math.floor(c[2] * 100 + 0.5) .. "," .. math.floor(c[3] * 100 + 0.5) end
+    assert(ns.Overhaul.applied.cast and C.bars.player == bar and C.bars.target == env.TargetFrameSpellBar and C.count == 2, "the cast bars are a piece of the overhaul: " .. tostring(C.count))
+    assert(CAST.border._alpha == 0 and CAST.textBox._alpha == 0 and CAST.background._alpha == 0, "the frame, the text box and the background art are invisible")
+    local d = ns.Menus.dressed[bar]
+    assert(d and d.inset == -1 and #d.edges == 4, "a flat background and a border just outside the bar")
+    assert(CAST.text._pointsBy.CENTER[2] == bar and rawget(CAST.text, "_alpha") == nil, "the spell's name sits on the bar")
+    assert(bar._barTexture == WHITE and fill() == "78,61,43", "the fill is a plain colour: your class colour for a cast: " .. fill())
+    -- the game sets the fill's picture again for each thing the bar does: the plain fill goes back, in that thing's colour
+    rawset(bar, "barType", "channel")
+    bar:SetStatusBarTexture("ui-castingbar-filling-channel")
+    assert(bar._barTexture == WHITE and fill() == "30,80,35", "a channel is green: " .. fill())
+    rawset(bar, "barType", "interrupted")
+    bar:SetStatusBarTexture("ui-castingbar-interrupted")
+    assert(bar._barTexture == WHITE and fill() == "85,25,25", "an interrupted cast is red")
+    rawset(bar, "barType", "uninterruptable")
+    bar:SetStatusBarTexture("ui-castingbar-uninterruptable")
+    assert(fill() == "60,60,60", "one that cannot be interrupted is grey")
+    rawset(bar, "barType", "standard")
+    bar:SetStatusBarTexture("ui-castingbar-filling-standard")
+    assert(fill() == "78,61,43", "and a cast again")
+    -- on its mover, and back on it the moment the game places it
+    local box = mover("castbar")
+    local function onBox() return bar._point[1] == "CENTER" and bar._point[2] == box end
+    assert(onBox() and box.label == "Cast bar" and box._size[1] == 208 and box._size[2] == 17, "the player's cast bar sits on its own box")
+    bar:SetPoint("BOTTOM", env.UIParent, "BOTTOM", 0, 120)
+    assert(onBox(), "the game placed it: back on its box in the same breath")
+    bar:SetPoint("BOTTOM", 0, 120)
+    assert(onBox(), "whichever way the game says where")
+    -- left to the game's own edit mode while that is open; back afterwards
+    local manager = stub("EditModeManagerFrame")
+    local OPEN = true
+    rawset(manager, "IsShown", function() return OPEN end)
+    env.EditModeManagerFrame = manager
+    bar:SetPoint("BOTTOM", env.UIParent, "BOTTOM", 0, 120)
+    assert(not onBox() and C.Check() == false, "left where the game's edit mode puts it while that is open")
+    OPEN = false
+    C.events._scripts.OnUpdate(C.events, 1.1)
+    assert(onBox(), "and back on its box within a second of it closing")
+    env.EditModeManagerFrame = nil
+    -- a cast starting: the game may have put the text back in its box
+    CAST.text:SetPoint("TOP", bar, "BOTTOM", 0, -4)
+    rawset(CAST.textBox, "_alpha", 1)
+    bar._hooks.OnShow(bar)
+    assert(CAST.text._point[1] == "CENTER" and CAST.textBox._alpha == 0, "when a cast starts the text is on the bar again")
+    assert(ns.settingsui.checks["cast.enabled"] and ns.settingsui.pages.cast, "the cast bars have a page of their own in the settings")
+
+    -- The Cast bar page: your own bar's width and height, the text's size and where it sits.
+    local sui = ns.settingsui
+    local function step(path, dir) click("MintCommunityToolsSetting" .. (dir > 0 and "More_" or "Less_") .. path:gsub("%.", "_")) end
+    local function says(path) return sui.steppers[path].text:GetText() end
+    assert(S.cast.width == 0 and S.cast.height == 0 and S.cast.fontSize == 0 and rawget(bar, "_width") == nil and rawget(CAST.text, "_font") == nil,
+      "until something is chosen the bar's size and its text's size are the game's")
+    assert(says("cast.width") == "Width: 208" and says("cast.height") == "Height: 11" and says("cast.fontSize") == "Text size: 10", "and the page shows what the game has")
+    assert(says("cast.textX") == "Text left / right: 0" and says("cast.textY") == "Text down / up: 0", "the text starts in the middle")
+    step("cast.width", 1); step("cast.height", 1)
+    assert(S.cast.width == 212 and S.cast.height == 12 and bar._width == 212 and bar._height == 12, "a step each, from the size it had: " .. S.cast.width .. "x" .. S.cast.height)
+    assert(box._size[1] == 212 and box._size[2] == 18 and onBox(), "its box in edit mode is the bar's new size, and the bar is on it")
+    assert(rawget(env.TargetFrameSpellBar, "_width") == nil, "the target's cast bar keeps its own size")
+    assert(ns.Overhaul.needsReload == false, "sizes change at once, without a reload")
+    -- the game gives the bar its own size back: the look once a second sets ours again
+    bar:SetWidth(208)
+    C.events._scripts.OnUpdate(C.events, 1.1)
+    assert(bar._width == 212, "a size the game put back is set again")
+    -- the text: its size, and how far from the middle it sits
+    step("cast.fontSize", 1)
+    assert(S.cast.fontSize == 11 and CAST.text._font[2] == 11 and CAST.text._font[1] == "Fonts\\FRIZQT__.TTF", "one step up from the size in use, in the same font")
+    step("cast.textX", 1); step("cast.textX", 1); step("cast.textY", -1)
+    assert(S.cast.textX == 4 and S.cast.textY == -1, "steps left and right, down and up")
+    assert(CAST.text._pointsBy.CENTER[2] == bar and CAST.text._pointsBy.CENTER[4] == 4 and CAST.text._pointsBy.CENTER[5] == -1, "the text sits that far from the bar's middle")
+    S.cast.textX = 9999
+    ns.Overhaul.Changed("cast.textX")
+    assert(CAST.text._pointsBy.CENTER[4] == 150, "kept inside what it may be")
+    -- switched off, the bar has the game's size back; on again, the chosen one
+    S.cast.textX = 4
+    local box2 = sui.checks["cast.enabled"]
+    rawset(box2, "_checked", false); box2._scripts.OnClick(box2)
+    assert(bar._width == 208 and bar._height == 11, "switched off: the size the game gave it")
+    rawset(box2, "_checked", true); box2._scripts.OnClick(box2)
+    assert(bar._width == 212 and bar._height == 12 and CAST.text._pointsBy.CENTER[4] == 4, "switched on: the chosen size and place again")
+    S.cast.width, S.cast.height, S.cast.fontSize, S.cast.textX, S.cast.textY = 0, 0, 0, 0, 0
+    rawset(bar, "_width", nil); rawset(bar, "_height", nil); rawset(CAST.text, "_font", nil)
+    ns.Overhaul.Changed("cast.width")
+    assert(CAST.text._pointsBy.CENTER[4] == 0 and box._size[1] == 208, "back to the game's own")
+    assert(env.TargetFrameSpellBar._barTexture == WHITE and env.TargetFrameSpellBar._point[5] == -8, "the target's cast bar is flat too, close under its frame")
+  end
+
+  -- The experience bar is your class colour, or the game's purple when the settings say so.
+  do
+    local xp = ns.Bars.xp
+    local function color() local c = xp.bar._color; return math.floor(c[1] * 100 + 0.5) .. "," .. math.floor(c[2] * 100 + 0.5) .. "," .. math.floor(c[3] * 100 + 0.5) end
+    assert(S.bars.xpClassColor == true and color() == "78,61,43", "class colour by default: " .. color())
+    local box = ns.settingsui.checks["bars.xpClassColor"]
+    rawset(box, "_checked", false)
+    box._scripts.OnClick(box)
+    assert(S.bars.xpClassColor == false and color() == "58,0,55" and ns.Overhaul.needsReload == false, "switched off: the game's purple, at once: " .. color())
+    rawset(box, "_checked", true)
+    box._scripts.OnClick(box)
+    assert(color() == "78,61,43", "and back")
+  end
+
   -- The bag windows: the window flat like the game menu's, each slot a flat square whose
   -- border is the colour of the item's quality.
   do
@@ -1894,7 +2206,8 @@ if S.enabled then
     assert(BAG.epicIcon._texCoord[1] == 0.08 and BAG.epicIcon._alpha == 1, "the item's picture is trimmed, and shows")
     -- an empty slot's picture is the game's empty-slot art: invisible, and not trimmed (it is
     -- an atlas: trimming would cut a piece out of the sheet it is on)
-    assert(BAG.emptyIcon._alpha == 0 and rawget(BAG.emptyIcon, "_texCoord") == nil, "an empty slot is the plain square: its slot art is invisible")
+    local untrimmed = rawget(BAG.emptyIcon, "_texCoord") == nil or BAG.emptyIcon._texCoord[1] == 0   -- (0 after the piece was switched off and on above)
+    assert(BAG.emptyIcon._alpha == 0 and untrimmed, "an empty slot is the plain square: its slot art is invisible, and not trimmed")
     BAG.emptyIcon:SetTexture(134414)
     assert(BAG.emptyIcon._alpha == 1 and BAG.emptyIcon._texCoord[1] == 0.08, "an item arrives: its picture shows, trimmed")
     BAG.emptyIcon:SetAtlas("bags-item-slot64")
@@ -1969,6 +2282,95 @@ if S.enabled then
     assert(B.Check() == false and B.Place() == false and not onBox(), "a closed bag window is left where it is")
   end
 
+  -- Switching a piece off and on again, without a reload. The four that only restyle the
+  -- game's frames, or add a frame of the addon's, put back exactly what they changed.
+  do
+    local O, M = ns.Overhaul, ns.Menus
+    local sui = ns.settingsui
+    local function flip(path, on)
+      local box = sui.checks[path]
+      rawset(box, "_checked", on)
+      box._scripts.OnClick(box)
+    end
+    local function black(tex) local c = tex._colorTexture; return c[1] == 0 and c[2] == 0 and c[3] == 0 end
+
+    -- the game menu and its windows
+    assert(MENU.borderArt._alpha == 0 and M.dressed[MENU.frame].bg._shown ~= false, "dressed to begin with")
+    flip("menus.enabled", false)
+    assert(O.applied.menus == nil and O.needsReload == false and M.IsOff("menus"), "the game menu is switched off at once")
+    assert(MENU.borderArt._alpha == 1 and MENU.headerArt._alpha == 1 and SP.checkArt._alpha == 1, "the game's art is back")
+    assert(M.dressed[MENU.frame].bg._shown == false and M.dressed[MENU.frame].edges[1]._shown == false and M.dressed[MENU.frame].hidden, "the addon's flat panel is gone")
+    assert(M.dressed[SP.x].mark._shown == false and M.dressed[SP.dropdown].mark._shown == false, "so are its x and v")
+    MENU.options._hooks.OnEnter(MENU.options)
+    assert(black(M.dressed[MENU.options].edges[1]), "its hooks do nothing while it is off")
+    rawset(MENU.borderArt, "_alpha", 1)
+    MENU.frame._hooks.OnShow(MENU.frame)
+    assert(MENU.borderArt._alpha == 1, "opening the menu while it is off dresses nothing")
+    assert(M.dressed[MENU.bag.frame].hidden == false and MENU.cast.border._alpha == 0, "the bag windows and the cast bars are untouched by it")
+    flip("menus.enabled", true)
+    assert(O.applied.menus == true and MENU.borderArt._alpha == 0 and M.dressed[MENU.frame].bg._shown and M.dressed[SP.x].mark._shown, "switched on again: dressed again")
+
+    -- the bag windows
+    local BAG = MENU.bag
+    assert(BAG.epicSlot._alpha == 0 and BAG.epicIcon._texCoord[1] == 0.08, "dressed to begin with")
+    flip("bags.enabled", false)
+    assert(O.applied.bags == nil and O.needsReload == false, "the bag windows are switched off at once")
+    assert(BAG.epicSlot._alpha == 1 and BAG.epicBorder._alpha == 1 and BAG.nineArt._alpha == 1, "the slot art, the quality frame and the window's border are back")
+    assert(BAG.epicIcon._texCoord[1] == 0 and BAG.epicIcon._texCoord[2] == 1 and BAG.emptyIcon._alpha == 1, "pictures are untrimmed, and an empty slot's art shows")
+    assert(M.dressed[BAG.frame].hidden and M.dressed[BAG.epic].hidden and M.dressed[BAG.sort].mark._shown == false, "the flat dress is gone")
+    assert(mover("bagwindow")._shown == false and mover("bagwindow").off == true, "its box is out of edit mode")
+    BAG.SHOWN = true
+    BAG.frame:SetPoint("BOTTOMRIGHT", env.UIParent, "BOTTOMRIGHT", -105, 90)
+    assert(ns.Bags.Place() == false and ns.Bags.Check() == false and BAG.frame._point[2] == env.UIParent, "the game places its bag windows itself again")
+    BAG.emptyIcon:SetTexture(134414)
+    assert(rawget(BAG.emptyIcon, "_texCoord") == nil or BAG.emptyIcon._texCoord[1] == 0, "and an arriving item's picture is not trimmed")
+    BAG.emptyIcon:SetAtlas("bags-item-slot64")
+    flip("bags.enabled", true)
+    assert(O.applied.bags == true and BAG.epicSlot._alpha == 0 and BAG.epicIcon._texCoord[1] == 0.08 and BAG.emptyIcon._alpha == 0, "switched on again: dressed again")
+    assert(M.dressed[BAG.frame].hidden == false and BAG.frame._point[2] == mover("bagwindow") and mover("bagwindow").off == false, "and back on its box")
+    BAG.SHOWN = false
+
+    -- the cast bars
+    local CAST, WHITE = MENU.cast, "Interface\\Buttons\\WHITE8X8"
+    flip("cast.enabled", false)
+    assert(O.applied.cast == nil and O.needsReload == false, "the cast bars are switched off at once")
+    assert(CAST.border._alpha == 1 and CAST.textBox._alpha == 1 and M.dressed[CAST.bar].hidden, "the frame and the text box are back, the flat dress gone")
+    CAST.bar:SetStatusBarTexture("ui-castingbar-filling-standard")
+    assert(CAST.bar._barTexture == "ui-castingbar-filling-standard", "the next cast has the game's own fill")
+    CAST.bar:SetPoint("BOTTOM", env.UIParent, "BOTTOM", 0, 120)
+    assert(CAST.bar._point[2] == env.UIParent and ns.CastBars.Check() == false and mover("castbar").off == true, "and the game places the bar")
+    flip("cast.enabled", true)
+    assert(O.applied.cast == true and CAST.border._alpha == 0 and CAST.bar._barTexture == WHITE and CAST.bar._point[2] == mover("castbar"), "switched on again: flat, and on its box")
+
+    -- the quest tracker: the addon's list goes, the game's own tracker comes back alive
+    local qt = ns.Quests.ui
+    flip("quests.enabled", false)
+    assert(O.applied.quests == nil and O.needsReload == false, "the quest tracker is switched off at once")
+    assert(qt.frame._shown == false and mover("quests").off == true, "the addon's list is gone, and its box")
+    assert(env.ObjectiveTrackerFrame._parent ~= hider and env.ObjectiveTrackerFrame._shown == true, "the game's tracker is back")
+    assert(ns.Quests.Check() == 0, "and is not hidden again")
+    flip("quests.enabled", true)
+    assert(O.applied.quests == true and qt.frame._shown and env.ObjectiveTrackerFrame._parent == hider and mover("quests").off == false, "switched on again")
+
+    -- the four that take the game's frames apart: off needs a reload, and says which
+    flip("bars.enabled", false)
+    assert(O.applied.bars == true and O.needsReload == true and table.concat(O.ReloadPieces(), ",") == "action bars", "action bars off: finished by a reload")
+    assert(sui.status:GetText():find("Reload to apply", 1, true) and sui.status:GetText():find("action bars", 1, true), "the Settings tab says so, and which: " .. sui.status:GetText())
+    flip("bars.enabled", true)
+    assert(O.needsReload == false and sui.status:GetText():find("is on", 1, true), "switched back on: nothing to reload for")
+
+    -- in combat nothing is set up or taken off; it is done when combat ends
+    env.InCombatLockdown = function() return true end
+    flip("quests.enabled", false)
+    assert(O.applied.quests == true and O.pendingApply == true and qt.frame._shown, "in combat the switch waits")
+    assert(sui.status:GetText():find("when combat ends", 1, true), "and the Settings tab says so")
+    env.InCombatLockdown = function() return false end
+    fire("PLAYER_REGEN_ENABLED")
+    assert(O.applied.quests == nil and O.pendingApply == nil and qt.frame._shown == false, "and is done when combat ends")
+    flip("quests.enabled", true)
+    assert(O.applied.quests == true and qt.frame._shown, "and on again")
+  end
+
   -- Edit mode: the movers show, drag, remember, and reset.
   slash("edit")
   ov.editing = ns.Overhaul.Editing()
@@ -2029,18 +2431,28 @@ else
     "with the overhaul off the game menu is not touched")
   assert(rawget(MENU.frame, "_hooks") == nil and not pcall(frameNamed, "MintCommunityToolsMenuEditCatch") and ns.Overhaul.PlaceMenuCatch() == false,
     "nor is its Edit Mode button caught")
+  assert(not pcall(frameNamed, "MintCommunityToolsMenuEditButton") and ns.Overhaul.PlaceMenuButton() == false, "nor given a button of the addon's")
   assert(ns.Menus.dressed[MENU.bag.frame] == nil and ns.Menus.dressed[MENU.bag.epic] == nil and rawget(MENU.bag.epicSlot, "_alpha") == nil, "nor are the bag windows")
+  assert(rawget(MENU.cast.border, "_alpha") == nil and rawget(MENU.cast.bar, "_barTexture") == nil and ns.CastBars.applied == nil, "nor the cast bar")
   ov.playerUntouched = rawget(env.PlayerFrame, "_parent") == nil and rawget(env.ActionButton1, "_point") == nil and rawget(env.Minimap, "_mask") == nil
   ov.noFrames = not pcall(frameNamed, "MintCommunityToolsPlayerFrame")
   slash("edit")
   ov.editRefused = not ns.Overhaul.Editing()
+  -- Turning it on sets everything up there and then, with no reload.
   slash("ui on")
   ov.turnedOn = { S.enabled, ns.Overhaul.needsReload }
+  ov.onLive = { pcall(frameNamed, "MintCommunityToolsPlayerFrame") and true or false, env.PlayerFrame._parent == hider,
+                ns.Overhaul.applied.bars == true, ns.Overhaul.applied.menus == true, env.ActionButton1._point[2] == mover("bar1") }
+  ov.onSaid = out.prints[#out.prints]
   slash("")
   click("MintCommunityToolsTab3")
-  ov.statusReload = ns.settingsui.status:GetText()
+  ov.statusOn = ns.settingsui.status:GetText()
+  -- Turning it off: what can be taken off is, at once; the rest is finished by a reload.
   slash("ui off")
-  ov.turnedOff = S.enabled
+  ov.turnedOff = { S.enabled, ns.Overhaul.needsReload, ns.Overhaul.applied.menus == nil, ns.Overhaul.applied.bars == true, ns.Menus.IsOff("menus") }
+  ov.offSaid = out.prints[#out.prints]
+  ov.statusReload = ns.settingsui.status:GetText()
+  ov.reloadFor = table.concat(ns.Overhaul.ReloadPieces(), ",")
 end
 
 -- The Settings tab is split into pages: one shows at a time, picked by the row of buttons.
@@ -2048,7 +2460,7 @@ do
   local sui = ns.settingsui
   local keys = {}
   for _, def in ipairs(ns.SettingsUI.PAGES) do keys[#keys + 1] = def.key end
-  assert(table.concat(keys, ",") == "general,bars,chat,units,map,quests", "the pages: " .. table.concat(keys, ","))
+  assert(table.concat(keys, ",") == "general,bars,chat,units,cast,map,quests", "the pages: " .. table.concat(keys, ","))
   click("MintCommunityToolsSettingsPage_units")
   assert(sui.page == "units" and sui.pages.units._shown and sui.pages.general._shown == false and sui.pages.quests._shown == false, "one page shows at a time")
   click("MintCommunityToolsSettingsPage_quests")
@@ -2076,7 +2488,7 @@ do
   assert(n >= 25, "every check box was looked at: " .. n)
   -- a long label wraps, and its row grows so the next row starts under it
   local function top(path) return sui.checks[path]._pointsBy.TOPLEFT[3] end
-  assert(sui.checks["menus.enabled"].label._wrap == true and top("menus.enabled") - top("menuEdit") == 30, "a label of two lines takes a taller row: " .. (top("menus.enabled") - top("menuEdit")))
+  assert(sui.checks["menus.enabled"].label._wrap == true and top("menus.enabled") - top("menuButton") == 30, "a label of two lines takes a taller row: " .. (top("menus.enabled") - top("menuButton")))
   assert(top("units.portrait") - top("units.portrait3d") == 18, "a label of one line keeps the usual row")
   -- two boxes on one row: each label has its column and is cut short rather than wrapped
   local a, b = sui.checks["units.buffTimers"], sui.checks["units.debuffTimers"]
@@ -2134,8 +2546,39 @@ do
     "/mint uidump menus records the game menu and its windows, and only those")
   assert(S.enabled ~= true or (menus.menus and menus.menus.GameMenuFrame), "with what the addon did to each")
 end
+slash("uidump chat")
+do
+  local d = env.MintCommunityToolsDB.uiDump
+  assert(d.group == "chat" and d.frames.ChatFrame1 and d.frames.Minimap == nil, "/mint uidump chat records the chat windows, and only those")
+  assert(type(d.chat) == "table" and type(d.chat.window) == "table" and type(d.chat.window.points) == "string" and d.chat.apis.FCF_SetChatWindowFontSize == "function",
+    "with how the main window is fastened")
+end
 slash("uidump")
 local dump = env.MintCommunityToolsDB.uiDump
+assert(type(dump.chat) == "table", "every dump says how the chat window is fastened")
+
+-- A file that came with an update while the game was running is not read by a /reload: the
+-- part it holds is missing for the rest of that session. The settings window still builds,
+-- and says what to do.
+do
+  assert(#ns.Overhaul.MissingParts() == 0, "every part loaded")
+  local cast = ns.CastBars
+  ns.CastBars = nil
+  assert(table.concat(ns.Overhaul.MissingParts(), ",") == "cast bars", "the part that did not load is named")
+  local before = #out.texts
+  local ok, err = pcall(ns.SettingsUI.Build, stub(), stub())
+  assert(ok, "the settings window builds without that part: " .. tostring(err))
+  local said = false
+  for i = before + 1, #out.texts do if out.texts[i] == ns.SettingsUI.RESTART_NOTE then said = true end end
+  local made = 0
+  for _, f in ipairs(out.frames) do if f._name == "MintCommunityToolsSettingMore_cast_width" or f._name == "MintCommunityToolsSetting_cast_enabled" then made = made + 1 end end
+  assert(said, "its page says to restart the game")
+  assert(made == 2, "with none of its own switches (the two counted are the first window's): " .. made)
+  assert(ns.settingsui.pages.quests and ns.settingsui.pages.cast, "and the pages after it are there")
+  assert(ns.settingsui.steppers["cast.width"] == nil and ns.settingsui.checks["cast.enabled"] == nil and ns.settingsui.steppers["bars.xpWidth"], "the window knows which switches it has")
+  assert(pcall(ns.SettingsUI.Refresh), "and the window refreshes")
+  ns.CastBars = cast
+end
 ov.dump = { type(dump), dump and dump.count > 0, dump and type(dump.frames.Minimap), dump and dump.apis.UnitXP,
             dump and dump.apis.NoSuchThing == nil, dump and #dump.missing > 0 }
 
@@ -2488,10 +2931,10 @@ def check_chat(result, variant):
     expected_globals = ["MintCommunityToolsDB", "SLASH_MINTCOMMUNITYTOOLS1", "SLASH_MINTCOMMUNITYTOOLS2", "SLASH_MINTCOMMUNITYTOOLS3"]
     if variant == "classic":
         expected_globals.remove("MintCommunityToolsDB")   # it was there before the addon loaded
-    if variant in ("classic", "mainline"):
-        # The overhaul's map is set up in these two, and tells other addons' minimap buttons
-        # what shape it is and how much room its strips take. Nothing else may leak.
-        expected_globals = sorted(expected_globals + ["GetMinimapShape", "GetMinimapEdgeInsets"])
+    # The overhaul's map is set up in every variant by the end (the one that starts with it off
+    # turns it on), and tells other addons' minimap buttons what shape it is and how much room
+    # its strips take. Nothing else may leak.
+    expected_globals = sorted(expected_globals + ["GetMinimapShape", "GetMinimapEdgeInsets"])
     assert result["newglobals"] == expected_globals, f"unexpected globals: {result['newglobals']}"
 
 
@@ -2503,8 +2946,16 @@ def check_overhaul(result, variant):
         assert ov["enabled"] is False, "off by default"
         assert ov["playerUntouched"] is True and ov["noFrames"] is True, "nothing of the game's UI is touched while it is off"
         assert ov["editRefused"] is True
-        assert ov["turnedOn"] == [True, True] and ov["turnedOff"] is False
-        assert "Reload to apply" in strip_colors(ov["statusReload"])
+        # Turning it on needs no reload: every piece is set up there and then.
+        assert ov["turnedOn"] == [True, False] and ov["onLive"] == [True, True, True, True, True], (ov["turnedOn"], ov["onLive"])
+        assert "is on" in ov["onSaid"] and "/reload" not in ov["onSaid"], ov["onSaid"]
+        # (this variant has no quest list the addon can read, so that one piece says it could not be set up)
+        assert "Could not be set up: quest tracker" in strip_colors(ov["statusOn"]), ov["statusOn"]
+        # Turning it off: the restyle-only pieces come off at once, the rest wait for a reload.
+        assert ov["turnedOff"] == [False, True, True, True, True], ov["turnedOff"]
+        assert ov["reloadFor"] == "action bars,chat,unit frames,minimap", ov["reloadFor"]
+        assert "/reload" in ov["offSaid"] and "action bars" in ov["offSaid"], ov["offSaid"]
+        assert "Reload to apply" in strip_colors(ov["statusReload"]) and "minimap" in ov["statusReload"]
         return
 
     assert ov["enabled"] is True

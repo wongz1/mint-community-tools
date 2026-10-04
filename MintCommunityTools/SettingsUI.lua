@@ -4,11 +4,16 @@
     The tab is split into pages, picked with the row of buttons across its top, so that it
     stays short however many pieces the overhaul grows: General (the switch for the whole
     overhaul, the game menu's switch, and the addon's own minimap button), then a page per
-    piece: action bars, chat, unit frames, minimap, quests. Each page has the piece's own switch and the choices inside
+    piece: action bars, chat, unit frames, cast bar, minimap, quests. Each page has the piece's own switch and the choices inside
     it: portraits, class colours, where a frame's buffs and debuffs go, what sits above and
     below the minimap. Under the pages, always there: Edit mode, Reset positions, Reload UI,
     and a line saying what state things are in. Switches that change the game's own frames
     take a reload to apply; that line says so.
+
+    A switch whose OFF is only finished by a reload says so in its own label, dimmed:
+    "(turning off needs a reload)". Which switches those are is asked of Overhaul.lua, the
+    same place that decides whether a reload is needed, so the label cannot say one thing
+    and the addon do another.
 
     Nothing may run past the window's sides. A check box's label is given the width that is
     left of its row and wraps onto as many lines as it needs, the row growing with it; a
@@ -30,6 +35,9 @@ local sui = { checks = {}, cycles = {}, steppers = {} }   -- the widgets, also r
 ns.settingsui = sui
 
 local SIDE_LABEL = { off = "Off", above = "Above", below = "Below", left = "Left", right = "Right" }
+SettingsUI.RELOAD_TAG = "(turning off needs a reload)"
+-- Shown in place of a page whose part of the addon this session has not loaded.
+SettingsUI.RESTART_NOTE = "This part came with an update while the game was running. Close the game completely and start it again to load it: a /reload is not enough."
 
 local function settings()
     return ns.Overhaul.Settings()
@@ -82,9 +90,10 @@ end
 
 local PAGES = {
     { key = "general", label = "General" },
-    { key = "bars", label = "Action bars" },
+    { key = "bars", label = "Bars" },
     { key = "chat", label = "Chat" },
-    { key = "units", label = "Unit frames" },
+    { key = "units", label = "Units" },
+    { key = "cast", label = "Cast bar" },
     { key = "map", label = "Minimap" },
     { key = "quests", label = "Quests" },
 }
@@ -108,6 +117,7 @@ function SettingsUI.Build(panel, frame)
     local CW = W.WIDTH - 2 * PAD
     sui.panel = panel
     sui.pages, sui.pageButtons = {}, {}
+    sui.checks, sui.cycles, sui.steppers = {}, {}, {}
 
     -- The page buttons, across the top.
     local bw = math.floor((CW - (#PAGES - 1) * 2) / #PAGES)
@@ -163,10 +173,13 @@ function SettingsUI.Build(panel, frame)
         y = y - math.max(18, math.ceil(height) + 6)
     end
     local function check(path, label, indent)
+        -- a switch whose OFF is finished by a reload says so, dimmed, after its label
+        local tagged = ns.Overhaul.OffNeedsReload(path)
+        if tagged then label = label .. " |cff" .. W.DIM_HEX .. SettingsUI.RELOAD_TAG .. "|r" end
         local cb = W.checkbox(page, "MintCommunityToolsSetting_" .. path:gsub("%.", "_"), label, function(on)
             SettingsUI.Set(path, on)
         end)
-        cb.path = path
+        cb.path, cb.reloadTag = path, tagged
         sui.checks[path] = cb
         boxed(cb, label, indent or 0)
     end
@@ -188,7 +201,7 @@ function SettingsUI.Build(panel, frame)
             SettingsUI.Set(path, on)
         end)
         cb:SetPoint("TOPLEFT", PAD + 2 + x, y - 2)
-        cb.path = path
+        cb.path, cb.reloadTag = path, false
         sui.checks[path] = cb
         fitLabel(cb, label, room - 18, false)
     end
@@ -196,8 +209,13 @@ function SettingsUI.Build(panel, frame)
     -- belongs to. `current`, when given, says what is in use while nothing has been chosen.
     local function stepper(path, label, x, current)
         local id = path:gsub("%.", "_")
-        local owner = path:match("^chat%.") and ns.Chat or ns.Units
-        local limit = owner.LIMITS[path:match("[^%.]+$")]
+        local owner
+        if path:match("^chat%.") then owner = ns.Chat
+        elseif path:match("^cast%.") then owner = ns.CastBars
+        elseif path:match("^bars%.") then owner = ns.Bars
+        else owner = ns.Units end
+        local limit = type(owner) == "table" and type(owner.LIMITS) == "table" and owner.LIMITS[path:match("[^%.]+$")]
+        if type(limit) ~= "table" then return false end   -- that part of the addon is not loaded
         local less = W.button(page, "MintCommunityToolsSettingLess_" .. id, "-", 18, function() SettingsUI.Step(path, -1) end)
         less:SetPoint("TOPLEFT", PAD + 2 + x, y)
         local more = W.button(page, "MintCommunityToolsSettingMore_" .. id, "+", 18, function() SettingsUI.Step(path, 1) end)
@@ -226,8 +244,9 @@ function SettingsUI.Build(panel, frame)
     start("general")
     header("The minimalist UI")
     check("enabled", "Use the minimalist UI: flat bars, chat, unit frames, minimap and quest list")
-    note("Off by default. Turning the whole thing, or a piece of it, on or off applies after a reload.")
+    note("Off by default. Every switch works at once, except turning off the ones marked \"turning off needs a reload\".")
     check("menus.enabled", "Flat game menu (Escape) and the windows it opens: Options, AddOns, Edit Mode, Macros", 18)
+    check("menuButton", "A Mint Edit Mode button at the bottom of the game menu", 18)
     check("menuEdit", "The game menu's Edit Mode button opens this UI's edit mode (Shift-click for the game's own)", 18)
     header("Minimap button")
     sui.buttonShown = W.checkbox(page, "MintCommunityToolsSettingMinimapButton", "Show this addon's minimap button", function(on)
@@ -247,6 +266,16 @@ function SettingsUI.Build(panel, frame)
     check("bars.enabled", "Flat action bars, each on its own mover; the pet and stance bars, bags and micro menu too")
     check("bars.hideMicro", "Hide the micro menu (Escape and the keybinds still open everything)", 18)
     check("bars.extraBags", "The keyring and the reagent bag slot in the bag row", 18)
+    header("Experience bar")
+    check("bars.xpClassColor", "In your class colour (turn off for the game's own purple)")
+    y = y - 2
+    do
+        local COL2, ROW = 18 + 216, W.BUTTON_H + GAP
+        stepper("bars.xpWidth", "Width", 0, function() return (ns.Bars.ExperienceSize()) end)
+        stepper("bars.xpHeight", "Height", COL2, function() return select(2, ns.Bars.ExperienceSize()) end)
+        y = y - ROW
+        note("Until you choose, the bar is as wide as a row of twelve buttons. Move it with Edit mode.")
+    end
     header("Bag windows")
     check("bags.enabled", "Flat bag windows: plain slots, with the border in the colour of the item's quality")
 
@@ -306,6 +335,28 @@ function SettingsUI.Build(panel, frame)
     checkAt("units.debuffTimers", "Countdown numbers on debuffs", COL2, CW - 2 - COL2)
     y = y - 18
     note("Width and height are the player and target frames'; the small frames are the target's target and the pet. A size changed in combat applies when it ends.")
+
+    start("cast")
+    header("Cast bars")
+    if not ns.CastBars then
+        -- a file that came with an update is only read when the game starts
+        note(SettingsUI.RESTART_NOTE)
+    else
+        check("cast.enabled", "Flat cast bars: no frame art, the spell's name on the bar, your own on a mover")
+    end
+    y = y - 2
+    if ns.CastBars then
+        local COL2, ROW = 18 + 216, W.BUTTON_H + GAP
+        stepper("cast.width", "Width", 18, function() return (ns.CastBars.Size()) end)
+        stepper("cast.height", "Height", COL2, function() return select(2, ns.CastBars.Size()) end)
+        y = y - ROW
+        stepper("cast.fontSize", "Text size", 18, function() return ns.CastBars.FontSize() end)
+        y = y - ROW
+        stepper("cast.textX", "Text left / right", 18)
+        stepper("cast.textY", "Text down / up", COL2)
+        y = y - ROW
+        note("Width and height are your own cast bar's. The text size and place are every cast bar's; the place is how far the spell's name sits from the middle of the bar. Each is as the game has it until you choose.")
+    end
 
     start("map")
     header("Minimap")
@@ -399,16 +450,19 @@ function SettingsUI.Refresh()
     sui.buttonShape:SetText(ns.MinimapShapeLabel())
     sui.edit:SetText(O.Editing() and "Exit edit mode" or "Edit mode")
     if O.needsReload then
-        setStatus("|cffffd100Reload to apply|r: what the game's own frames look like only changes at a reload. Click Reload UI when you are ready.")
+        setStatus("|cffffd100Reload to apply|r: turning off the " .. table.concat(O.ReloadPieces(), ", ")
+            .. " puts the game's own frames back, which only a reload can do. Click Reload UI when you are ready.")
+    elseif O.pendingApply then
+        setStatus("In combat: this will be done when combat ends.")
     elseif not s.enabled then
-        setStatus("The minimalist UI is off. Turn it on, reload, then use Edit mode to arrange it.")
+        setStatus("The minimalist UI is off. Turn it on, then use Edit mode to arrange it.")
     else
         local pieces = {}
         for _, piece in ipairs(O.PIECES) do
             if not O.applied[piece.key] and s[piece.key].enabled then pieces[#pieces + 1] = piece.label end
         end
         if #pieces > 0 then
-            setStatus("Not set up this session: " .. table.concat(pieces, ", ") .. ". Reload to apply.")
+            setStatus("Could not be set up: " .. table.concat(pieces, ", ") .. ". The reason is in chat.")
         else
             setStatus("The minimalist UI is on. Edit mode moves things; portraits, aura rows, the minimap strips and the quest list change at once.")
         end
