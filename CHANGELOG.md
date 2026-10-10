@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.5.7 - 2026-10-09
+
+Checked against client build 70334 (the October 9 update) with `/mint uidump all`.
+
+- **Cast bars: the glow and flakes are gone.** The client plays glows, flakes and a finishing
+  flash on the cast bars; the flat skin now takes those off too (yours and your pet's).
+- **The game's own windows are flat.** The character window, the map, Guild & Communities,
+  Friends, Professions and Legacy (the windows the micro menu opens) join the flat skin:
+  frame and background art gone, flat close buttons, side tabs as flat squares with their
+  icons. The map itself and its pins are untouched. Inside them, from a second round of
+  records: the headings of lists that fold, the cards in the friends and professions
+  windows, small square picture buttons, the search bars, the strip lit under the mouse on a
+  row and the lines between rows are flat too; so are the quest log's frame beside the map,
+  the map's pin button, its side-panel toggle and its maximize button; and from a third,
+  the guild window's list of communities and Guild Finder backdrop, and the Legacy window's
+  tree page, its cards, points bar and dividers. Their switch is the game menu's, on the
+  **General** page.
+- **Vendor window, second pass.** The slot picture and name plate behind each item, the slot
+  picture behind the repair and sell-junk buttons, and the page arrows are flat now.
+- **`/mint uidump all`** records every group at once (open the windows first), and each
+  group is now kept on its own in the save file, so one `/reload` writes them all. A word
+  after a group names the record (`/mint uidump menus gameplay`), for recording the Options
+  window one page at a time: it only builds the page that is open. `/mint uidump mouse`
+  records whatever the mouse is over, and `/mint uidump frame <Name>` any frame by name.
+
 ## 0.5.6 - 2026-10-04
 
 - **Loot and vendor windows.** The window that opens when you loot something, and a vendor's

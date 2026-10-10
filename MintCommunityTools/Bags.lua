@@ -127,7 +127,8 @@ end
 -- a corpse or a chest holds) and the vendor's window. A flat panel, flat buttons and tabs,
 -- items in plain slots with the border in the colour of their quality. Each fills itself
 -- when it opens and as its pages are turned. Built without a look at this client's loot and
--- vendor windows; /mint uidump loot and /mint uidump vendor record them.
+-- vendor windows at first; the vendor's was then checked against /mint uidump vendor on build
+-- 70334, the loot window's rows are still unseen (/mint uidump loot with one open).
 local LOOT_WINDOWS = { "LootFrame", "MerchantFrame" }
 local LOOT_RELAYS = { LootFrame = { "Open", "Update" }, MerchantFrame = {} }
 -- The vendor's window is filled by functions of the game's that are not the window's own.
@@ -135,11 +136,61 @@ local LOOT_GLOBALS = { "MerchantFrame_Update", "MerchantFrame_UpdateMerchantInfo
 Bags.LOOT_WINDOWS = LOOT_WINDOWS
 local lootHooked = {}
 
+-- The vendor's window keeps art the window dressing does not know as a control: a slot
+-- picture and a name plate behind each item (and the buyback slot), a slot picture behind
+-- the repair and sell-junk buttons, and the page-turning arrows. Seen in /mint uidump vendor
+-- on build 70334.
+local VENDOR_ROW_ART = { "SlotTexture", "NameFrame" }
+local VENDOR_ICON_BUTTONS = { "MerchantRepairAllButton", "MerchantRepairItemButton", "MerchantGuildBankRepairButton", "MerchantSellAllJunkButton" }
+local VENDOR_PAGE_BUTTONS = { MerchantPrevPageButton = "<", MerchantNextPageButton = ">" }
+
+local function dressVendor()
+    if ns.Menus.IsOff("bags") or not frame("MerchantFrame") then return 0 end
+    return ns.Menus.As("bags", function()
+        local M = ns.Menus
+        local n = 0
+        local rows = { "MerchantBuyBackItem" }
+        for i = 1, 12 do rows[#rows + 1] = "MerchantItem" .. i end
+        for _, row in ipairs(rows) do
+            for _, suffix in ipairs(VENDOR_ROW_ART) do
+                local t = frame(row .. suffix)
+                if t then
+                    M.Hide(t)
+                    n = n + 1
+                end
+            end
+        end
+        -- the slot picture is the one texture drawn behind the button's icon
+        for _, name in ipairs(VENDOR_ICON_BUTTONS) do
+            local b = frame(name)
+            if b and type(b.GetRegions) == "function" then
+                local ok, regions = pcall(function() return { b:GetRegions() } end)
+                for _, r in ipairs(ok and regions or {}) do
+                    if type(r) == "table" and r ~= b.Icon and type(r.GetDrawLayer) == "function" then
+                        local okLayer, layer = pcall(r.GetDrawLayer, r)
+                        if okLayer and layer == "BACKGROUND" then
+                            M.Hide(r)
+                            n = n + 1
+                        end
+                    end
+                end
+            end
+        end
+        for name, mark in pairs(VENDOR_PAGE_BUTTONS) do
+            local b = frame(name)
+            if b and M.FlatMarked(b, mark, 8) then n = n + 1 end
+        end
+        Bags.vendorArt = n
+        return n
+    end)
+end
+
 local function dressLoot()
     local n = 0
     for _, name in ipairs(LOOT_WINDOWS) do
         if ns.Menus.DressNamed(name, LOOT_RELAYS[name], "bags") then n = n + 1 end
     end
+    pcall(dressVendor)
     for _, name in ipairs(LOOT_GLOBALS) do
         if not lootHooked[name] and hooksecurefunc and type(_G[name]) == "function" then
             lootHooked[name] = true
@@ -181,6 +232,7 @@ function Bags.Refresh()
             if ok and shown == true then pcall(ns.Menus.Dress, f, name, "bags") end
         end
     end
+    pcall(dressVendor)
     return n
 end
 

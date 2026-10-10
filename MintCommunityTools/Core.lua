@@ -11,12 +11,18 @@
     /mint minimap round | square | auto   the shape of the minimap the button sits around
     /mint ui [on | off | reset]   the minimalist UI overhaul (Settings tab); reset puts every frame back
     /mint edit               edit mode: drag the overhaul's frames where you want them
-    /mint uidump [menus | bags | cast | chat | meter | loot | vendor]   record what this client's own interface is made of
+    /mint uidump [all | menus | bags | cast | chat | meter | loot | vendor] [name]
+    /mint uidump frame <Name> | mouse   record what this client's own interface is made of
                              (for bug reports); "menus" records the game menu and the windows
                              it opens instead, "bags" the bag windows (have them open), "cast"
                              the cast bars, "chat" the chat windows, "meter" the game's damage
                              meter (have it on screen with a few bars in it), "loot" the loot window
-                             and "vendor" a vendor's window (have one open)
+                             and "vendor" a vendor's window (have one open); "all" records
+                             every group at once (open everything first); a name after the
+                             group keeps that record apart ("menus gameplay": the Options
+                             window's Gameplay page, which only exists while it is open);
+                             "frame <Name>" records one frame by name, "mouse" whatever the
+                             mouse is over (point, press Enter, type it, press Enter)
     /mint region XX          set your region (US, EU, KR, TW, CN) if the client cannot tell the addon
     /mint json               the gear export as raw JSON in the window (for debugging)
     /mint debug              print client build info and which APIs exist (paste this in bug reports)
@@ -42,7 +48,7 @@
 
 local ADDON, ns = ...
 ns.NAME = "MintCommunityTools"
-ns.VERSION = "0.5.6"
+ns.VERSION = "0.5.7"
 
 -- True when Saved.lua has already put the last save in place. The client's own loading,
 -- when it works, happens later, at ADDON_LOADED.
@@ -286,7 +292,9 @@ SLASH_MINTCOMMUNITYTOOLS1 = "/mint"
 SLASH_MINTCOMMUNITYTOOLS2 = "/mct"
 SLASH_MINTCOMMUNITYTOOLS3 = "/gb"
 SlashCmdList["MINTCOMMUNITYTOOLS"] = function(msg)
-    local cmd, arg = (msg or ""):lower():match("^%s*(%S*)%s*(%S*)")
+    -- the third word is left as typed: it may be a frame's name
+    local cmd, arg, more = (msg or ""):match("^%s*(%S*)%s*(%S*)%s*(%S*)")
+    cmd, arg = cmd:lower(), arg:lower()
     cmd = cmd or ""
     if cmd == "" then
         ns.UI.Toggle()
@@ -311,7 +319,7 @@ SlashCmdList["MINTCOMMUNITYTOOLS"] = function(msg)
     elseif cmd == "edit" then
         ns.Overhaul.ToggleEdit()
     elseif cmd == "uidump" then
-        ns.Dump.Run(arg)
+        ns.Dump.Run(arg ~= "" and arg or nil, more ~= "" and more or nil)
     elseif cmd == "region" then
         doRegion(arg)
     elseif cmd == "debug" then

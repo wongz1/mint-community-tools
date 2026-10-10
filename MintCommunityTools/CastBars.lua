@@ -26,7 +26,7 @@
     the same way and the bar put back on its mover at once, so it is never seen anywhere
     else. While the game's own edit mode is open the bar is left to it.
 
-    Built without a look at this client's cast bars; /mint uidump cast records them.
+    Checked against /mint uidump cast on build 70334, which is where the effects were seen.
 ]]
 
 local ADDON, ns = ...
@@ -45,6 +45,15 @@ local BARS = {
 Cast.BARS = BARS
 -- The parts a bar's art is kept in.
 local ART = { "Border", "TextBorder", "Background", "BorderShield" }
+-- The effects a newer client plays on a bar: glows, flakes and sparkles that its animations
+-- fade in and out while a cast runs, and the flash when one finishes. An animation sets a
+-- texture's alpha, so making these invisible is not enough: their picture is taken off
+-- (and written down, for when the cast bars are switched off).
+local EFFECTS = {
+    "DropShadow", "EnergyGlow", "Flakes01", "Flakes02", "Flakes03", "Flash", "ChargeFlash", "ChargeGlow", "InterruptGlow",
+    "Shine", "BaseGlow", "WispGlow", "Sparkles01", "Sparkles02", "StandardGlow", "CraftGlow", "ChannelShadow",
+}
+Cast.EFFECTS = EFFECTS
 local MOVER_DEFAULT = { "BOTTOM", 0, 186 }
 local COLORS = {
     channel = { 0.3, 0.8, 0.35 },
@@ -103,6 +112,28 @@ function Cast.Color(bar)
     if c then return c[1], c[2], c[3] end
     local r, g, b = ns.W.accent()
     return r, g, b
+end
+
+-- Takes the picture off one of a bar's effect textures, once; its atlas or file is written
+-- down so that it can have it back.
+local function blankEffect(tex)
+    if type(tex) ~= "table" or type(tex.SetTexture) ~= "function" then return false end
+    local atlas, file
+    if type(tex.GetAtlas) == "function" then
+        local ok, a = pcall(tex.GetAtlas, tex)
+        if ok and type(a) == "string" and a ~= "" then atlas = a end
+    end
+    if not atlas and type(tex.GetTexture) == "function" then
+        local ok, f = pcall(tex.GetTexture, tex)
+        if ok and (type(f) == "string" or type(f) == "number") then file = f end
+    end
+    ns.Menus.Remember(tex, "picture", function()
+        if atlas and type(tex.SetAtlas) == "function" then pcall(tex.SetAtlas, tex, atlas)
+        elseif file then pcall(tex.SetTexture, tex, file) end
+    end)
+    ns.Menus.Hide(tex)
+    pcall(tex.SetTexture, tex, nil)
+    return true
 end
 
 -- The spell's name on the bar itself, in the skin's small font. Where the game had it, and
@@ -183,6 +214,7 @@ local function skin(bar)
     local W = ns.W
     local hide = ns.Menus.Hide
     for _, key in ipairs(ART) do hide(bar[key]) end
+    for _, key in ipairs(EFFECTS) do blankEffect(bar[key]) end
     -- the border goes just outside the bar: the fill covers everything inside it
     ns.Menus.Flat(bar, W.COLOR.panel, -1)
     if bar == Cast.bars.player then resize(bar) end
@@ -208,6 +240,7 @@ local function skin(bar)
                 if ns.Menus.IsOff("cast") then return end
                 ns.Menus.As("cast", function()
                     for _, key in ipairs(ART) do ns.Menus.Hide(self[key]) end
+                    for _, key in ipairs(EFFECTS) do blankEffect(self[key]) end
                     placeText(self)
                 end)
             end)

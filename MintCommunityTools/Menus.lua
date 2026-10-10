@@ -59,8 +59,37 @@ local WINDOWS = {
     -- meter's bar height and the like), and its dialogs
     "EditModeSystemSettingsDialog", "EditModeNewLayoutDialog", "EditModeImportLayoutDialog", "EditModeImportLayoutLinkDialog",
     "EditModeUnsavedChangesDialog",
+    -- the game's own windows, from the micro menu: seen in /mint uidump on build 70334
+    "CharacterFrame", "WorldMapFrame", "CommunitiesFrame", "SocialUIFrame", "ProfessionsFrame", "LegacySystemFrame",
 }
 Menus.WINDOWS = WINDOWS
+-- Parts of a window that hold nothing but background art (a stone wall behind the character,
+-- the map's frame and its row of place names, the friends window's fades): every texture on
+-- them is made invisible. A name with a dot is a field of the window, else a global name.
+local ART_HOLDERS = {
+    CharacterFrame = { "CharacterFrameLeftPaneHost", "CharacterFrameRightPaneHost" },
+    WorldMapFrame = { ".BorderFrame", ".OverscrollBG", ".navBar", ".navBar.overlay", ".TitleCanvasSpacerFrame",
+                      "QuestScrollFrame", "QuestScrollFrame.BorderFrame", "QuestLogCount" },
+    SocialUIFrame = { ".BattleNetBar", ".BattleNetBar.ControlsContainer", ".FriendsList" },
+    CommunitiesFrame = { "CommunitiesFrameCommunitiesList", "CommunitiesFrameCommunitiesList.FilligreeOverlay",
+                         "ClubFinderGuildFinderFrame.DisabledFrame" },
+    LegacySystemFrame = { ".RewardTrackPage", ".TreePage", ".TreePage.LegacyTreePointSummary", ".TreePage.VerticalDivider",
+                          ".ChallengesPage.VerticalDivider" },
+}
+-- Parts of a window that are left entirely alone: the map itself and the pins on it.
+local LEAVE = {
+    WorldMapFrame = { ".ScrollContainer", ".BlackoutFrame" },
+    CharacterFrame = { "CharacterModelScene" },
+}
+-- Parts whose buttons are flat whatever their art is kept in: the map's row of place names.
+local PLAIN_BUTTONS = {
+    WorldMapFrame = { ".navBar" },
+}
+-- Buttons with a picture for a face that mean one thing: a flat square with a mark on it.
+local EXTRA_MARKS = {
+    WorldMapFrame = { { ".SidePanelToggle.CloseButton", ">", 6 }, { ".SidePanelToggle.OpenButton", "<", 6 } },
+    CharacterFrame = { { "CharacterFrameRightPaneToggleButton", "=", 4 } },
+}
 -- Windows that fill themselves again while they are open: dressed again after these.
 local REFILLS = {
     EditModeSystemSettingsDialog = { "UpdateSettings", "UpdateButtons", "UpdateExtraButtons", "AttachToSystemFrame" },
@@ -68,7 +97,7 @@ local REFILLS = {
 -- The parts of a window its art is kept in. A part may be a frame or a single texture.
 local PARTS = { "NineSlice", "Border", "BorderBox", "Bg", "BG", "Background", "Inset", "Header", "TopTileStreaks", "PortraitContainer", "TitleBg" }
 local CLOSE = { "CloseButton", "ClosePanelButton" }
-local MAX_DEPTH, MAX_FRAMES = 5, 800
+local MAX_DEPTH, MAX_FRAMES = 6, 1500
 local NESTED = { 0, 0, 0, 0.2 }      -- behind a framed area inside a window
 local WINDOW = { 0.06, 0.06, 0.06, 0.95 }   -- behind a whole window: these are read, so nearly solid
 local THUMB = { 0.45, 0.45, 0.45, 1 }
@@ -454,6 +483,10 @@ local function flatCheck(cb)
     if type(cb.Icon) == "table" or type(cb.icon) == "table" then return false end
     local checked = part(cb, "GetCheckedTexture")
     if not checked then return false end
+    -- a check box is small; a large one is a card or a tab that happens to be a CheckButton
+    local okW, w = pcall(cb.GetWidth, cb)
+    local okH, h = pcall(cb.GetHeight, cb)
+    if (okW and type(w) == "number" and w > 40) or (okH and type(h) == "number" and h > 40) then return false end
     local W = ns.W
     for _, getter in ipairs({ "GetNormalTexture", "GetPushedTexture", "GetHighlightTexture" }) do hide(part(cb, getter)) end
     local width = type(cb.GetWidth) == "function" and cb:GetWidth()
@@ -482,7 +515,10 @@ end
 
 -- A drop-down: a button with a Background, an Arrow and its Text.
 local function isDropdown(b)
-    return isType(b, "Button") and type(b.Arrow) == "table" and type(b.Background) == "table" and type(b.Text) == "table"
+    if not (isType(b, "Button") and type(b.Background) == "table" and type(b.Text) == "table") then return false end
+    if type(b.Arrow) == "table" then return true end
+    local atlas = atlasOf(b.Background)
+    return atlas ~= nil and atlas:lower():find("dropdown", 1, true) ~= nil
 end
 
 local function flatDropdown(b)
@@ -496,11 +532,14 @@ end
 
 -- A search box (or any edit box framed by three pieces).
 local function isFramedEdit(e)
-    return isType(e, "EditBox") and type(e.Left) == "table" and type(e.Right) == "table" and type(e.Middle) == "table"
+    if not isType(e, "EditBox") then return false end
+    if isType(e.Background, "Texture") then return true end
+    return type(e.Left) == "table" and type(e.Right) == "table" and type(e.Middle) == "table"
 end
 
 local function flatEdit(e)
     hide(e.Left); hide(e.Right); hide(e.Middle)
+    if isType(e.Background, "Texture") then hide(e.Background) end
     return flat(e, ns.W.COLOR.panel) ~= nil
 end
 
@@ -692,6 +731,135 @@ local function paintBar(tex)
     if hooksecurefunc and type(tex.SetAtlas) == "function" then pcall(hooksecurefunc, tex, "SetAtlas", paint) end
 end
 
+-- A side tab (the character window's, the professions window's): a frame with a Background
+-- (the tab's shape), an Icon, and a SelectedTexture shown on the open one. The shape goes
+-- for a flat square, the icon stays, and the open one's SelectedTexture is a faint wash of
+-- the accent colour.
+local function isSideTab(f)
+    if not (isType(f.Background, "Texture") and isType(f.Icon, "Texture")) then return false end
+    local atlas = atlasOf(f.Background)
+    if atlas and atlas:lower():find("sidetab", 1, true) then return true end
+    return not isType(f, "Button") and isType(f.SelectedTexture, "Texture")
+end
+
+local function flatSideTab(f)
+    hide(f.Background)
+    for _, key in ipairs({ "HighlightTexture", "TabGlow" }) do
+        if isType(f[key], "Texture") then hide(f[key]) end
+    end
+    if isType(f.SelectedTexture, "Texture") then paintBar(f.SelectedTexture) end
+    local d = flat(f, ns.W.COLOR.panel, 2)
+    if d and isType(f, "Button") then hoverHooks(f) end
+    return d ~= nil
+end
+
+-- Does any texture of the frame's wear an atlas with this word in its name?
+local function wears(f, word)
+    for _, r in ipairs(list(f.GetRegions, f)) do
+        if isType(r, "Texture") and not own[r] then
+            local atlas = atlasOf(r)
+            if atlas and atlas:lower():find(word, 1, true) then return true end
+        end
+    end
+    return false
+end
+
+-- Every texture of the frame's wearing an atlas with this word in its name is made invisible.
+local function hideWearing(f, word)
+    local n = 0
+    for _, r in ipairs(list(f.GetRegions, f)) do
+        if isType(r, "Texture") and not own[r] then
+            local atlas = atlasOf(r)
+            if atlas and atlas:lower():find(word, 1, true) then
+                hide(r)
+                n = n + 1
+            end
+        end
+    end
+    return n
+end
+
+-- A heading in a list that folds (the character's statistics, the quest log, the friends
+-- list): a button drawn with the "collapseExpand" strip. The strip goes; its name and its
+-- plus or minus stay.
+local function isListHeader(b)
+    return isType(b, "Button") and wears(b, "collapseexpand")
+end
+
+local function flatListHeader(b)
+    hideWearing(b, "collapseexpand")
+    local d = flat(b, ns.W.COLOR.panel)
+    if d then hoverHooks(b) end
+    return d ~= nil
+end
+
+-- A card (a friend in the friends list, a profession on the professions page): a frame or
+-- button with a "card" picture behind it. The picture goes for a faint flat panel.
+local function isCard(f)
+    if not isType(f.Background, "Texture") then return false end
+    local atlas = atlasOf(f.Background)
+    return atlas ~= nil and atlas:lower():find("card", 1, true) ~= nil
+end
+
+local function flatCard(f)
+    hideWearing(f, "card")
+    hide(f.Background)
+    local d = flat(f, NESTED)
+    if d and isType(f, "Button") then hoverHooks(f) end
+    return d ~= nil
+end
+
+-- A row in a scrolling list with a picture behind it (the guild window's list of communities):
+-- a button, straight under a list's ScrollTarget, with a Background. The picture and whatever
+-- lights up on the row go; its icon stays; a faint flat panel takes their place.
+local function isListRow(b)
+    if not (isType(b, "Button") and isType(b.Background, "Texture")) then return false end
+    local parent = part(b, "GetParent")
+    local list_ = parent and part(parent, "GetParent")
+    return list_ ~= nil and list_.ScrollTarget == parent
+end
+
+local function flatListRow(b)
+    local keep = {}
+    for _, key in ipairs({ "Icon", "icon", "ActionIcon" }) do
+        if isType(b[key], "Texture") then keep[b[key]] = true end
+    end
+    for _, r in ipairs(list(b.GetRegions, b)) do
+        if isType(r, "Texture") and not own[r] and not keep[r] then hide(r) end
+    end
+    local d = flat(b, NESTED)
+    if d then hoverHooks(b) end
+    return d ~= nil
+end
+
+-- A small square button with a picture on it (the friends window's menu and party buttons,
+-- the map's pin button): its frame art goes, the picture stays, a flat square takes its place.
+local ICONS = { "Icon", "icon", "ActionIcon" }
+local function isIconButton(b)
+    if not isType(b, "Button") then return false end
+    local icon = false
+    for _, key in ipairs(ICONS) do
+        if isType(b[key], "Texture") then icon = true end
+    end
+    if not icon then return false end
+    if wears(b, "common-button") then return true end
+    return isType(b.Border, "Texture") and isType(b.Background, "Texture")
+end
+
+local function flatIconButton(b)
+    local keep = {}
+    for _, key in ipairs(ICONS) do
+        if isType(b[key], "Texture") then keep[b[key]] = true end
+    end
+    for _, r in ipairs(list(b.GetRegions, b)) do
+        if isType(r, "Texture") and not own[r] and not keep[r] then hide(r) end
+    end
+    local d = flat(b, ns.W.COLOR.panel, 2)
+    if d then hoverHooks(b) end
+    return d ~= nil
+end
+Menus.FlatIconButton = flatIconButton
+
 ---------------------------------------------------------------------------
 -- Everything inside a window
 ---------------------------------------------------------------------------
@@ -720,8 +888,8 @@ dressInside = function(f, depth, budget)
         budget.left = budget.left - 1
         if type(child) == "table" and not budget.skip[child] then
             local deeper = false
-            if isType(child, "CheckButton") then
-                if flatCheck(child) then n = n + 1 end
+            if isType(child, "CheckButton") and flatCheck(child) then
+                n = n + 1
             elseif isSlider(child) then
                 if flatSlider(child) then n = n + 1 end
             elseif isFramedEdit(child) then
@@ -742,6 +910,19 @@ dressInside = function(f, depth, budget)
                 hide(child.Background)
                 flat(child, ns.W.COLOR.panel)
                 n = n + 1
+            elseif isSideTab(child) then
+                if flatSideTab(child) then n = n + 1 end
+            elseif isListHeader(child) then
+                if flatListHeader(child) then n = n + 1 end
+                deeper = true
+            elseif isCard(child) then
+                if flatCard(child) then n = n + 1 end
+                deeper = true
+            elseif isListRow(child) then
+                if flatListRow(child) then n = n + 1 end
+                deeper = true
+            elseif isIconButton(child) then
+                if flatIconButton(child) then n = n + 1 end
             else
                 if isNineSlice(child) then
                     if flatPanel(child) then n = n + 1 end
@@ -749,7 +930,17 @@ dressInside = function(f, depth, budget)
                     clearPart(child.Border)
                     if flat(child, NESTED) then n = n + 1 end
                 end
-                if type(child.ScrollTarget) == "table" then watchScrollBox(child) end
+                if type(child.ScrollTarget) == "table" then
+                    watchScrollBox(child)
+                    -- the lines a list draws between its rows live in nameless frames of its own
+                    for _, kid in ipairs(list(child.GetChildren, child)) do
+                        if kid ~= child.ScrollTarget and isType(kid, "Frame") and not isType(kid, "Button") and part(kid, "GetName") == nil then
+                            n = n + sweep(kid)
+                        end
+                    end
+                end
+                -- the strip lit under the mouse on a row
+                if type(child.BackgroundHighlight) == "table" then n = n + sweep(child.BackgroundHighlight) end
                 deeper = true
             end
             if deeper and depth < MAX_DEPTH then n = n + dressInside(child, depth + 1, budget) end
@@ -763,9 +954,12 @@ Menus.DressInside = function(f) return dressInside(f, 1, { left = MAX_FRAMES, sk
 -- whatever their art is kept in.
 local function dressGameMenu(f)
     local n = 0
+    local seen = {}
     for _, child in ipairs(list(f.GetChildren, f)) do
         if isType(child, "Button") and child ~= f.CloseButton then
             if flatButton(child) then n = n + 1 end
+            local text = type(child.GetText) == "function" and select(2, pcall(child.GetText, child))
+            seen[#seen + 1] = (type(text) == "string" and text or "?") .. (dressed[child] and "" or " (not dressed)")
             if type(child.SetNormalFontObject) == "function" then
                 local normal, highlight = part(child, "GetNormalFontObject"), part(child, "GetHighlightFontObject")
                 remember(child, "font", function()
@@ -777,6 +971,8 @@ local function dressGameMenu(f)
             end
         end
     end
+    -- for /mint uidump: the menu's buttons come and go with it
+    Menus.gameMenu = { buttons = seen, dressed = n }
     return n
 end
 
@@ -826,10 +1022,81 @@ dressWindow = function(f, name)
             end
         end
     end
+    -- a window whose frame is kept in a BorderFrame (the map): its parts are there
+    local border = type(f.BorderFrame) == "table" and f.BorderFrame or nil
+    if border then
+        for _, key in ipairs(PARTS) do
+            local p = border[key]
+            if type(p) == "table" then
+                skip[p] = true
+                result.art = result.art + clearPart(p)
+            end
+        end
+    end
+    -- parts that hold nothing but art, parts left alone, parts whose buttons are all flat
+    local function resolve(path)
+        local cur = f
+        local first = true
+        for key in path:gmatch("[^%.]+") do
+            if first and path:sub(1, 1) ~= "." then cur = frame(key) else cur = type(cur) == "table" and cur[key] or nil end
+            first = false
+            if type(cur) ~= "table" then return nil end
+        end
+        return cur
+    end
+    for _, path in ipairs(name and ART_HOLDERS[name] or {}) do
+        local holder = resolve(path)
+        if holder then
+            result.art = result.art + sweep(holder)
+            -- and the nameless frames in it that hold a line or two more
+            for _, kid in ipairs(list(holder.GetChildren, holder)) do
+                if isType(kid, "Frame") and not isType(kid, "Button") and part(kid, "GetName") == nil then result.art = result.art + sweep(kid) end
+            end
+        end
+    end
+    -- a window that can be made large or small: the two buttons for it, flat, with + and -
+    local sizer = type(f.MaximizeMinimizeFrame) == "table" and f.MaximizeMinimizeFrame or (border and border.MaximizeMinimizeFrame)
+    if type(sizer) == "table" then
+        for key, mark in pairs({ MaximizeButton = "+", MinimizeButton = "-" }) do
+            local b = sizer[key]
+            if type(b) == "table" then
+                skip[b] = true
+                if Menus.FlatMarked(b, mark) then result.buttons = result.buttons + 1 end
+            end
+        end
+    end
+    -- the few buttons a window keeps that look like nothing else
+    for _, extra in ipairs(name and EXTRA_MARKS[name] or {}) do
+        local b = resolve(extra[1])
+        if b then
+            skip[b] = true
+            if Menus.FlatMarked(b, extra[2], extra[3]) then result.buttons = result.buttons + 1 end
+        end
+    end
+    for _, path in ipairs(name and LEAVE[name] or {}) do
+        local p = resolve(path)
+        if p then skip[p] = true end
+    end
+    for _, path in ipairs(name and PLAIN_BUTTONS[name] or {}) do
+        local holder = resolve(path)
+        for _, child in ipairs(holder and list(holder.GetChildren, holder) or {}) do
+            if isType(child, "Button") then
+                skip[child] = true
+                if flatButton(child) then result.buttons = result.buttons + 1 end
+            end
+        end
+    end
     flat(f, WINDOW)
     for _, key in ipairs(CLOSE) do
         local b = f[key]
         if type(b) == "table" then
+            skip[b] = true
+            if flatClose(b) then result.buttons = result.buttons + 1 end
+        end
+    end
+    if border then
+        local b = name and frame(name .. "CloseButton")
+        if b and not skip[b] then
             skip[b] = true
             if flatClose(b) then result.buttons = result.buttons + 1 end
         end

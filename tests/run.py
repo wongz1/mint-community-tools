@@ -447,6 +447,15 @@ do
   rawset(CAST.bar, "Border", CAST.border); rawset(CAST.bar, "TextBorder", CAST.textBox)
   rawset(CAST.bar, "Background", CAST.background); rawset(CAST.bar, "Text", CAST.text)
   rawset(CAST.bar, "barType", "standard")
+  -- the effects a newer client plays on the bar: pictures its animations fade in and out
+  CAST.glow, CAST.flakes = art(), art()
+  rawset(CAST.glow, "_atlas", "Cast_Standard_GlowLine"); rawset(CAST.flakes, "_atlas", "Cast_Standard_Flakes01")
+  for _, t in ipairs({ CAST.glow, CAST.flakes }) do
+    rawset(t, "GetAtlas", function(self) return rawget(self, "_atlas") end)
+    rawset(t, "SetAtlas", function(self, a) rawset(self, "_atlas", a) end)
+    rawset(t, "SetTexture", function(self, file) rawset(self, "_texture", file); if file == nil then rawset(self, "_atlas", nil); rawset(self, "_cleared", true) end end)
+  end
+  rawset(CAST.bar, "EnergyGlow", CAST.glow); rawset(CAST.bar, "Flakes01", CAST.flakes)
   rawset(CAST.bar, "GetWidth", function(self) return rawget(self, "_width") or 208 end)
   rawset(CAST.bar, "GetHeight", function(self) return rawget(self, "_height") or 11 end)
   rawset(CAST.text, "GetFont", function(self)
@@ -2478,6 +2487,140 @@ if S.enabled then
     fire("ADDON_LOADED", "Blizzard_MacroUI")
     assert(M.windows.MacroFrame and macroArt._alpha == 0 and M.dressed[macro] and M.count == 4, "a window that loads later is dressed then")
     assert(ns.settingsui.checks["menus.enabled"], "the game menu has its switch on the General page")
+    -- The game's own windows from the micro menu (seen on build 70334): the character window
+    -- with its side tabs and the stone wall behind the character; the map, whose frame is in
+    -- a BorderFrame, whose row of place names is plain buttons, and whose map and pins are
+    -- left alone.
+    do
+      local char = MENU.typed(stub("CharacterFrame"), "Frame")
+      local charArt, wall, closeArt = MENU.art(), MENU.art(), MENU.art()
+      rawset(char, "NineSlice", MENU.holding(MENU.typed(stub(), "Frame"), { charArt }))
+      local pane = MENU.holding(MENU.typed(stub("CharacterFrameLeftPaneHost"), "Frame"), { wall })
+      env.CharacterFrameLeftPaneHost = pane
+      local closeBtn = MENU.holding(MENU.typed(stub("CharacterFrameCloseButton"), "Button"), { closeArt })
+      env.CharacterFrameCloseButton = closeBtn
+      local tab = MENU.typed(stub(), "Frame")
+      local tabBg, tabIcon, tabSel = MENU.art(), MENU.art(), MENU.art()
+      rawset(tabSel, "_atlas", "common-sidetab-selected")
+      rawset(tabSel, "GetAtlas", function(self) return rawget(self, "_atlas") end)
+      rawset(tab, "Background", tabBg); rawset(tab, "Icon", tabIcon); rawset(tab, "SelectedTexture", tabSel)
+      MENU.holding(tab, { tabBg, tabIcon, tabSel })
+      MENU.holding(char, { }, { pane, closeBtn, tab })
+      env.CharacterFrame = char
+      local map = MENU.typed(stub("WorldMapFrame"), "Frame")
+      local mapArt, barArt, pinArt = MENU.art(), MENU.art(), MENU.art()
+      local borderFrame = MENU.typed(stub(), "Frame")
+      rawset(borderFrame, "NineSlice", MENU.holding(MENU.typed(stub(), "Frame"), { mapArt }))
+      rawset(map, "BorderFrame", borderFrame)
+      local navBar = MENU.holding(MENU.typed(stub(), "Frame"), { barArt })
+      local crumb = MENU.holding(MENU.typed(stub(), "Button"), { MENU.art() })
+      MENU.holding(navBar, { barArt }, { crumb })
+      rawset(map, "navBar", navBar)
+      local canvas = MENU.typed(stub(), "ScrollFrame")
+      -- a pin that looks like a push button to the dressing (art in Left, Middle and Right)
+      local pin = MENU.pushButton("Middle")
+      rawset(pin, "Left", pinArt)
+      MENU.holding(canvas, {}, { pin })
+      rawset(map, "ScrollContainer", canvas)
+      MENU.holding(map, {}, { borderFrame, navBar, canvas })
+      env.WorldMapFrame = map
+      M.DressAll()
+      assert(M.windows.CharacterFrame and M.windows.CharacterFrame.error == nil, "the character window is dressed without an error: " .. tostring(M.windows.CharacterFrame and M.windows.CharacterFrame.error))
+      assert(M.dressed[char] and charArt._alpha == 0 and wall._alpha == 0, "the character window is flat, the wall behind the character gone")
+      assert(M.dressed[closeBtn] and closeArt._alpha == 0, "its close button is flat")
+      assert(M.dressed[tab] and tabBg._alpha == 0 and rawget(tabIcon, "_alpha") == nil and tabSel._texture == "Interface\\Buttons\\WHITE8X8", "a side tab is a flat square, its icon kept, its open mark a wash of the accent colour: dressed=" .. tostring(M.dressed[tab] ~= nil) .. " bg=" .. tostring(rawget(tabBg, "_alpha")) .. " icon=" .. tostring(rawget(tabIcon, "_alpha")) .. " sel=" .. tostring(rawget(tabSel, "_texture")))
+      assert(M.windows.WorldMapFrame and mapArt._alpha == 0 and barArt._alpha == 0 and M.dressed[crumb], "the map's frame and its row of place names are flat")
+      assert(rawget(pinArt, "_alpha") == nil and not M.dressed[pin], "the map and its pins are left alone, even one that looks like a button")
+      -- the second pass, from the records taken after the first: what the windows still showed
+      local function atlasArt(atlas) local t = MENU.art(); rawset(t, "_atlas", atlas); rawset(t, "GetAtlas", function(self) return rawget(self, "_atlas") end); return t end
+      -- a side tab that is a button, with no open mark of its own (the friends window)
+      local friendTab = MENU.typed(stub(), "Button")
+      local friendTabBg, friendTabIcon = atlasArt("common-sidetab"), atlasArt("friends-icon-tab-friends")
+      rawset(friendTab, "Background", friendTabBg); rawset(friendTab, "Icon", friendTabIcon)
+      MENU.holding(friendTab, { friendTabBg, friendTabIcon })
+      -- a heading in a list that folds, with its name and its minus
+      local header = MENU.typed(stub(), "Button")
+      local strip, stripLit, minus = atlasArt("common-button-list-collapseExpand"), atlasArt("common-button-list-collapseExpand"), atlasArt("common-button-list-minus")
+      rawset(header, "StateIcon", minus)
+      MENU.holding(header, { strip, stripLit, minus })
+      -- a card, with the picture behind it and the one lit when it is chosen
+      local card = MENU.typed(stub(), "Button")
+      local cardBg, cardLit, presence = atlasArt("friends-card-disabled"), atlasArt("friends-card-selected"), atlasArt("friends-status-online")
+      rawset(card, "Background", cardBg)
+      MENU.holding(card, { cardBg, cardLit })
+      -- a small square button with a picture on it
+      local square = MENU.typed(stub(), "Button")
+      local squareFace, squareIcon = atlasArt("common-button-tertiary-square-normal"), atlasArt("friends-icon-menu")
+      rawset(square, "Icon", squareIcon)
+      MENU.holding(square, { squareFace, squareIcon })
+      -- a row with the strip lit under the mouse
+      local row = MENU.typed(stub(), "Frame")
+      local lit = MENU.holding(MENU.typed(stub(), "Frame"), { atlasArt("charactercreate-customize-dropdown-linemouseover-m") })
+      rawset(row, "BackgroundHighlight", lit)
+      -- a list whose lines between rows live in a nameless frame of its own
+      local box = MENU.typed(stub(), "Frame")
+      local target = MENU.typed(stub(), "Frame")
+      rawset(box, "ScrollTarget", target)
+      local lineArt = atlasArt("UI-Character-Info-ScrollLine-Long")
+      local lineHolder = MENU.holding(MENU.typed(stub(), "Frame"), { lineArt })
+      MENU.holding(box, {}, { target, lineHolder })
+      -- the stats pane's toggle, which has a picture for a face
+      local paneToggle = MENU.holding(MENU.typed(stub("CharacterFrameRightPaneToggleButton"), "Button"), { MENU.art() })
+      env.CharacterFrameRightPaneToggleButton = paneToggle
+      MENU.holding(char, { }, { pane, closeBtn, tab, friendTab, header, card, square, row, box, paneToggle })
+      -- the map: its pin button, the toggles for its side panel, and the buttons that make it large or small
+      local pinBtn = MENU.typed(stub(), "Button")
+      local pinBg, pinBorder, pinIcon = MENU.art(), MENU.art(), atlasArt("Waypoint-MapPin-Untracked")
+      rawset(pinBtn, "Background", pinBg); rawset(pinBtn, "Border", pinBorder); rawset(pinBtn, "Icon", pinIcon)
+      MENU.holding(pinBtn, { pinBg, pinBorder, pinIcon })
+      rawset(map, "WorldMapTrackingPinButton", pinBtn)
+      local sideToggle = MENU.typed(stub(), "Frame")
+      local panelClose = MENU.holding(MENU.typed(stub(), "Button"), { MENU.art() })
+      rawset(sideToggle, "CloseButton", panelClose)
+      rawset(map, "SidePanelToggle", sideToggle)
+      local sizer = MENU.typed(stub(), "Frame")
+      local maxBtn = MENU.holding(MENU.typed(stub(), "Button"), { MENU.art() })
+      rawset(sizer, "MaximizeButton", maxBtn)
+      rawset(borderFrame, "MaximizeMinimizeFrame", sizer)
+      MENU.holding(map, {}, { borderFrame, navBar, canvas, pinBtn, sideToggle })
+      M.DressAll()
+      assert(M.windows.CharacterFrame.error == nil and M.windows.WorldMapFrame.error == nil, "dressed again without an error: " .. tostring(M.windows.CharacterFrame.error) .. " / " .. tostring(M.windows.WorldMapFrame.error))
+      assert(M.dressed[friendTab] and friendTabBg._alpha == 0 and rawget(friendTabIcon, "_alpha") == nil, "a side tab that is a button, with no open mark, is a flat square with its icon")
+      assert(M.dressed[header] and strip._alpha == 0 and stripLit._alpha == 0 and rawget(minus, "_alpha") == nil, "a list heading loses its strip and keeps its minus")
+      assert(M.dressed[card] and cardBg._alpha == 0 and cardLit._alpha == 0, "a card loses its picture and the one lit when chosen")
+      assert(M.dressed[square] and squareFace._alpha == 0 and rawget(squareIcon, "_alpha") == nil, "a small square button loses its face and keeps its picture")
+      assert(lineArt._alpha == 0, "the lines a list draws between its rows are gone")
+      assert(M.dressed[paneToggle] and M.dressed[pinBtn] and pinBg._alpha == 0 and pinBorder._alpha == 0 and rawget(pinIcon, "_alpha") == nil, "the stats toggle and the map's pin button are flat squares, the pin's picture kept")
+      assert(M.dressed[panelClose] and M.dressed[maxBtn], "the side panel's toggle and the maximize button are flat squares with a mark")
+      -- the third round (the guild and Legacy windows): a row in a scrolling list with a
+      -- picture behind it, and a card that happens to be a large CheckButton
+      local listBox, listTarget = MENU.typed(stub(), "Frame"), MENU.typed(stub(), "Frame")
+      rawset(listBox, "ScrollTarget", listTarget)
+      local rowBtn = MENU.typed(stub(), "Button")
+      local rowBg, rowLit, rowIcon = MENU.art(), MENU.art(), atlasArt("communities-icon-addgroupplus")
+      rawset(rowBtn, "Background", rowBg); rawset(rowBtn, "Icon", rowIcon)
+      rawset(rowBtn, "GetParent", function() return listTarget end)
+      rawset(listTarget, "GetParent", function() return listBox end)
+      MENU.holding(rowBtn, { rowBg, rowLit, rowIcon })
+      MENU.holding(listTarget, {}, { rowBtn })
+      MENU.holding(listBox, {}, { listTarget })
+      local bigCheck = MENU.typed(stub(), "CheckButton")
+      rawset(bigCheck, "GetWidth", function() return 142 end)
+      rawset(bigCheck, "GetHeight", function() return 93 end)
+      local bigBg, bigRing, bigTick = atlasArt("Legacy-Tree-Frame-Card"), atlasArt("Legacy-Tree-Frame-Card-Ring"), MENU.art()
+      rawset(bigCheck, "Background", bigBg)
+      rawset(bigCheck, "GetCheckedTexture", function() return bigTick end)
+      MENU.holding(bigCheck, { bigBg, bigRing, bigTick })
+      local guild = MENU.typed(stub("CommunitiesFrame"), "Frame")
+      MENU.holding(guild, {}, { listBox, bigCheck })
+      env.CommunitiesFrame = guild
+      M.DressAll()
+      assert(M.windows.CommunitiesFrame.error == nil, "the guild window is dressed without an error: " .. tostring(M.windows.CommunitiesFrame.error))
+      assert(M.dressed[rowBtn] and rowBg._alpha == 0 and rowLit._alpha == 0 and rawget(rowIcon, "_alpha") == nil, "a list row loses the picture behind it and what lights up on it, and keeps its icon")
+      assert(M.dressed[bigCheck] and bigBg._alpha == 0 and bigRing._alpha == 0 and rawget(bigTick, "_texture") == nil, "a card that is a large CheckButton is a card, not a check box: no tick is drawn on it")
+      env.CommunitiesFrame = nil
+      env.CharacterFrame, env.CharacterFrameLeftPaneHost, env.CharacterFrameCloseButton, env.WorldMapFrame, env.CharacterFrameRightPaneToggleButton = nil, nil, nil, nil, nil
+    end
     env.MacroFrame = nil   -- the harness's own, not a global the addon made
     -- The game's edit mode has a box of settings for whatever is clicked there (the damage
     -- meter's bar height and the like). It is one of the flat windows, and it fills itself
@@ -2507,6 +2650,12 @@ if S.enabled then
     local function fill() local c = bar._color; return math.floor(c[1] * 100 + 0.5) .. "," .. math.floor(c[2] * 100 + 0.5) .. "," .. math.floor(c[3] * 100 + 0.5) end
     assert(ns.Overhaul.applied.cast and C.bars.player == bar and C.bars.target == env.TargetFrameSpellBar and C.count == 2, "the cast bars are a piece of the overhaul: " .. tostring(C.count))
     assert(CAST.border._alpha == 0 and CAST.textBox._alpha == 0 and CAST.background._alpha == 0, "the frame, the text box and the background art are invisible")
+    -- the effects: their picture is taken off, since the game's animations would set their
+    -- alpha back; what they showed is remembered
+    assert(CAST.glow._alpha == 0 and CAST.glow._cleared == true and rawget(CAST.glow, "_atlas") == nil and CAST.flakes._cleared == true, "the glow and the flakes have no picture")
+    CAST.glow:SetAlpha(1)   -- an animation
+    assert(rawget(CAST.glow, "_atlas") == nil, "and an animation fading one in shows nothing")
+    rawset(CAST.glow, "_alpha", 0)
     local d = ns.Menus.dressed[bar]
     assert(d and d.inset == -1 and #d.edges == 4, "a flat background and a border just outside the bar")
     assert(CAST.text._pointsBy.CENTER[2] == bar and rawget(CAST.text, "_alpha") == nil, "the spell's name sits on the bar")
@@ -2647,6 +2796,23 @@ if S.enabled then
       assert(not M.dressed[nextPage], "a page turned: not dressed in the same breath")
       B.events._scripts.OnUpdate(B.events, 0.2)
       assert(M.dressed[nextPage] and nextArt._alpha == 0, "but a moment later")
+      -- the art the vendor's rows keep (seen on build 70334): the slot picture and the name
+      -- plate behind each item, the slot picture behind the repair button, the page arrows
+      local slotArt, namePlate, repairBg, repairIcon = MENU.art(), MENU.art(), MENU.art(), MENU.art()
+      rawset(repairBg, "GetDrawLayer", function() return "BACKGROUND" end)
+      rawset(repairIcon, "GetDrawLayer", function() return "BORDER" end)
+      local repair = MENU.typed(stub("MerchantRepairAllButton"), "Button")
+      rawset(repair, "Icon", repairIcon)
+      rawset(repair, "GetRegions", function() return repairBg, repairIcon end)
+      local nextPage = MENU.holding(MENU.typed(stub("MerchantNextPageButton"), "Button"), { MENU.art() })
+      env.MerchantItem1SlotTexture, env.MerchantItem1NameFrame, env.MerchantRepairAllButton, env.MerchantNextPageButton = slotArt, namePlate, repair, nextPage
+      env.MerchantFrame = vendor
+      fire("MERCHANT_UPDATE")
+      B.events._scripts.OnUpdate(B.events, 0.2)
+      assert(slotArt._alpha == 0 and namePlate._alpha == 0, "the slot picture and the name plate behind an item are invisible")
+      assert(repairBg._alpha == 0 and rawget(repairIcon, "_alpha") == nil, "the slot picture behind the repair button is, its icon is not")
+      assert(M.dressed[nextPage] and B.vendorArt == 4, "the page arrow is a flat square: " .. tostring(B.vendorArt))
+      env.MerchantItem1SlotTexture, env.MerchantItem1NameFrame, env.MerchantRepairAllButton, env.MerchantNextPageButton = nil, nil, nil, nil
       env.MerchantFrame, env.MerchantFrame_Update = nil, nil
     end
     assert(M.dressed[BAG.frame] and BAG.nineArt._alpha == 0 and BAG.portrait._alpha == 0, "the window: its border and the bag's portrait gone, a flat panel")
@@ -2785,12 +2951,14 @@ if S.enabled then
     flip("cast.enabled", false)
     assert(O.applied.cast == nil and O.needsReload == false, "the cast bars are switched off at once")
     assert(CAST.border._alpha == 1 and CAST.textBox._alpha == 1 and M.dressed[CAST.bar].hidden, "the frame and the text box are back, the flat dress gone")
+    assert(rawget(CAST.glow, "_atlas") == "Cast_Standard_GlowLine" and rawget(CAST.flakes, "_atlas") == "Cast_Standard_Flakes01", "the effects have their pictures back")
     CAST.bar:SetStatusBarTexture("ui-castingbar-filling-standard")
     assert(CAST.bar._barTexture == "ui-castingbar-filling-standard", "the next cast has the game's own fill")
     CAST.bar:SetPoint("BOTTOM", env.UIParent, "BOTTOM", 0, 120)
     assert(CAST.bar._point[2] == env.UIParent and ns.CastBars.Check() == false and mover("castbar").off == true, "and the game places the bar")
     flip("cast.enabled", true)
     assert(O.applied.cast == true and CAST.border._alpha == 0 and CAST.bar._barTexture == WHITE and CAST.bar._point[2] == mover("castbar"), "switched on again: flat, and on its box")
+    assert(rawget(CAST.glow, "_atlas") == nil and CAST.glow._alpha == 0, "and the effects are gone again")
 
     -- the quest tracker: the addon's list goes, the game's own tracker comes back alive
     local qt = ns.Quests.ui
@@ -2884,6 +3052,7 @@ else
   assert(not pcall(frameNamed, "MintCommunityToolsMenuEditButton") and ns.Overhaul.PlaceMenuButton() == false, "nor given a button of the addon's")
   assert(ns.Menus.dressed[MENU.bag.frame] == nil and ns.Menus.dressed[MENU.bag.epic] == nil and rawget(MENU.bag.epicSlot, "_alpha") == nil, "nor are the bag windows")
   assert(rawget(MENU.cast.border, "_alpha") == nil and rawget(MENU.cast.bar, "_barTexture") == nil and ns.CastBars.applied == nil, "nor the cast bar")
+  assert(rawget(MENU.cast.glow, "_atlas") == "Cast_Standard_GlowLine" and rawget(MENU.cast.glow, "_cleared") == nil, "nor its effects")
   ov.playerUntouched = rawget(env.PlayerFrame, "_parent") == nil and rawget(env.ActionButton1, "_point") == nil and rawget(env.Minimap, "_mask") == nil
   ov.noFrames = not pcall(frameNamed, "MintCommunityToolsPlayerFrame")
   slash("edit")
@@ -3031,6 +3200,41 @@ do
   assert(table.concat(d.meter.mixins.DamageMeterEntryMixin, ",") == "Init,UpdateStyle", "what each mixin can do: " .. table.concat(d.meter.mixins.DamageMeterEntryMixin, ","))
   assert(d.meter.api[1] == "GetAvailableCombatSessions" and d.meter.globals.DamageMeterEntryMixin == "table", "and the meter's own API")
   env.DamageMeterSessionWindow1, env.SomeDamageMeterThing, env.DamageMeterEntryMixin, env.C_DamageMeter = nil, nil, nil, nil
+end
+-- /mint uidump all takes every group at once, and each is kept apart so that one /reload
+-- writes them all; the plain dump is the screen's.
+do
+  env.MintCommunityToolsDB.uiDumps = nil
+  slash("uidump all")
+  local all = env.MintCommunityToolsDB.uiDumps
+  assert(type(all) == "table" and all.screen and all.menus and all.bags and all.cast and all.chat and all.meter and all.loot and all.vendor, "every group is recorded")
+  assert(all.screen.frames.Minimap and all.menus.frames.GameMenuFrame and all.bags.frames.ContainerFrameCombinedBags and all.menus.frames.Minimap == nil, "each with its own frames")
+  assert(env.MintCommunityToolsDB.uiDump == all.screen and all.screen.group == "screen", "the plain dump is the screen's")
+  assert(out.prints[#out.prints]:find("recorded every group", 1, true) and out.prints[#out.prints]:find("screen ", 1, true), "and it says what it took: " .. out.prints[#out.prints])
+  local chatBefore, menusBefore = all.chat, all.menus
+  slash("uidump chat")
+  assert(all.chat ~= chatBefore and all.menus == menusBefore, "a group taken again replaces its own copy and no other")
+  -- a record with a name is kept apart: one page of the Options window at a time
+  slash("uidump menus gameplay")
+  assert(all["menus:gameplay"] and all["menus:gameplay"].label == "gameplay" and all["menus:gameplay"].frames.SettingsPanel and all.menus == menusBefore,
+    "a named record is its own, and the plain one is left")
+  assert(out.prints[#out.prints]:find('as "gameplay"', 1, true), "and it says so: " .. out.prints[#out.prints])
+  assert(type(all.menus.gameMenu) == "table" and #all.menus.gameMenu.buttons > 0 and all.menus.gameMenu.buttons[1] == MENU.options:GetText(),
+    "the game menu's buttons, from when it last opened, are written down: " .. table.concat(all.menus.gameMenu.buttons, ", "))
+  -- one frame by name, or whatever the mouse is over: the topmost named frame it is part of
+  slash("uidump frame Minimap")
+  assert(all["frame:Minimap"] and all["frame:Minimap"].group == "frame" and all["frame:Minimap"].frames.Minimap and all["frame:Minimap"].frames.ChatFrame1 == nil, "one frame by its name")
+  slash("uidump frame NoSuchFrameAtAll")
+  assert(all["frame:NoSuchFrameAtAll"] == nil and out.prints[#out.prints]:find("no frame named NoSuchFrameAtAll", 1, true), "a name the client does not have: said, not recorded")
+  local part = stub()
+  rawset(part, "_parent", env.ChatFrame1)
+  env.GetMouseFoci = function() return { part } end
+  slash("uidump mouse")
+  assert(all["frame:ChatFrame1"] and all["frame:ChatFrame1"].mouse == "(unnamed) < ChatFrame1", "the mouse over a nameless part of the chat window: the window is recorded, with the way down to the part: " .. tostring(all["frame:ChatFrame1"] and all["frame:ChatFrame1"].mouse))
+  env.GetMouseFoci = function() return {} end
+  slash("uidump mouse")
+  assert(out.prints[#out.prints]:find("not over a frame", 1, true), "the mouse over nothing: said")
+  env.GetMouseFoci = nil
 end
 slash("uidump")
 local dump = env.MintCommunityToolsDB.uiDump

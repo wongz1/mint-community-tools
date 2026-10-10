@@ -7,3 +7,4 @@ __pycache__/
 
 # a link to the game's save file on the developer's machine (link-saved-settings.sh)
 MintCommunityTools/Saved.lua
+tools/dumps/*.lua

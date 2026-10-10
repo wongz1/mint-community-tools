@@ -9,8 +9,19 @@
     gryphon or a round border is told from everything else); and its child frames, a few
     levels down. It also notes which functions the overhaul would like to use exist.
 
-    The record goes into the saved variables (uiDump), which the game writes to disk at the
-    next /reload or logout. Nothing is sent anywhere.
+    The record goes into the saved variables (uiDump, and uiDumps[group] for each group so
+    that several can be taken before one /reload), which the game writes to disk at the next
+    /reload or logout. Nothing is sent anywhere. /mint uidump all takes every group at once:
+    open the windows first (the game menu and each of its windows, your bags, a vendor, the
+    loot window, the damage meter) so that they exist. tools/uidump.lua reads the save file,
+    prints a group's frames and says what changed since a copy kept from an earlier client.
+    A word after the group names the record (/mint uidump menus gameplay): each named record
+    is kept on its own, which is how several pages of one window are recorded, one at a time,
+    before a single /reload. The game's Options window only builds the page that is open.
+    /mint uidump frame <Name> records any one frame by its name, six levels down, and
+    /mint uidump mouse records whatever the mouse is over (point at it, press Enter, type
+    the command, press Enter: the mouse stays where it was): the topmost named frame it is
+    part of, and the way down to the part under the mouse.
 
     /mint uidump records the frames on screen during play (bars, unit frames, chat, minimap,
     quest tracker). /mint uidump menus records the game menu and the windows it opens
@@ -34,7 +45,7 @@ ns.Dump = Dump
 local pairs, ipairs, type, tostring, pcall = pairs, ipairs, type, tostring, pcall
 local floor = math.floor
 
-local MAX_NODES = 2500
+local MAX_NODES = 4000
 
 -- name -> how many levels of child frames to follow
 local ROOTS = {
@@ -60,7 +71,7 @@ local ROOTS = {
 
 -- /mint uidump menus: the game menu and the windows it opens, a good way down.
 local MENU_ROOTS = {
-    { "GameMenuFrame", 4 }, { "SettingsPanel", 4 }, { "AddonList", 4 }, { "EditModeManagerFrame", 3 }, { "EditModeSystemSettingsDialog", 5 },
+    { "GameMenuFrame", 4 }, { "SettingsPanel", 8 }, { "AddonList", 4 }, { "EditModeManagerFrame", 3 }, { "EditModeSystemSettingsDialog", 5 },
     { "MacroFrame", 3 }, { "HelpFrame", 2 }, { "KeyBindingFrame", 2 }, { "InterfaceOptionsFrame", 2 },
     { "VideoOptionsFrame", 2 }, { "StaticPopup1", 2 }, { "GameTooltip", 1 }, { "DropDownList1", 1 },
 }
@@ -340,13 +351,44 @@ local function meterInfo(out)
     return info
 end
 
-function Dump.Run(group)
-    local roots = GROUPS[group or ""] or ROOTS
+-- The groups, in the order /mint uidump all takes them.
+local ORDER = { "screen", "menus", "bags", "cast", "chat", "meter", "loot", "vendor" }
+Dump.GROUPS = ORDER
+
+-- The frame under the mouse: the topmost named frame it is part of (what is recorded), and
+-- the way down from there to the part the mouse is over.
+local function underMouse()
+    local f
+    if type(GetMouseFoci) == "function" then
+        local ok, list = pcall(GetMouseFoci)
+        if ok and type(list) == "table" then f = list[1] end
+    elseif type(GetMouseFocus) == "function" then
+        local ok, v = pcall(GetMouseFocus)
+        if ok then f = v end
+    end
+    if type(f) ~= "table" or f == WorldFrame or f == UIParent then return nil end
+    local chain, top, cur = {}, nil, f
+    for _ = 1, 24 do
+        if type(cur) ~= "table" or cur == UIParent or cur == WorldFrame then break end
+        local name
+        if type(cur.GetName) == "function" then
+            local ok, n = pcall(cur.GetName, cur)
+            if ok and type(n) == "string" and n ~= "" then name = n end
+        end
+        chain[#chain + 1] = name or "(unnamed)"
+        if name then top = cur end
+        cur = type(cur.GetParent) == "function" and select(2, pcall(cur.GetParent, cur)) or nil
+    end
+    return top, table.concat(chain, " < ")
+end
+
+local function record(group, label, roots)
+    roots = roots or GROUPS[group or ""] or ROOTS
     nodes = 0
     local version, build, _, toc
     if GetBuildInfo then version, build, _, toc = GetBuildInfo() end
     local out = { at = time(), addon = ns.VERSION, version = version, build = build, toc = toc, apis = {}, frames = {}, missing = {},
-                  group = GROUPS[group or ""] and group or "screen" }
+                  group = (GROUPS[group or ""] or group == "frame") and group or "screen" }
     if ns.Menus then
         out.menus = {}
         for name, result in pairs(ns.Menus.windows) do out.menus[name] = result end
@@ -402,8 +444,58 @@ function Dump.Run(group)
         out.meter = ok and meter or { error = tostring(meter) }
     end
     out.count = nodes
-    ns.DB().uiDump = out
-    ns.Say(("recorded %d of the game's frames (%d frames and textures in all; %d names this client does not have). "
-        .. "Type /reload to write it to the save file."):format(found, nodes, #out.missing))
+    out.found = found
+    if type(label) == "string" and label ~= "" then out.label = label end
+    local db = ns.DB()
+    db.uiDump = out
+    db.uiDumps = type(db.uiDumps) == "table" and db.uiDumps or {}
+    db.uiDumps[out.label and (out.group .. ":" .. out.label) or out.group] = out
+    -- what the game menu last showed: its buttons come and go with it, so a dump taken while
+    -- it is closed has none
+    if ns.Menus and ns.Menus.gameMenu then out.gameMenu = ns.Menus.gameMenu end
+    return out
+end
+
+function Dump.Run(group, label)
+    -- one frame, by its name or by pointing at it
+    if group == "frame" or group == "mouse" then
+        local target, path
+        if group == "mouse" then
+            target, path = underMouse()
+            if not target then
+                ns.Say("the mouse is not over a frame of the game's with a name. Point at it, press Enter, type /mint uidump mouse, press Enter.")
+                return nil
+            end
+        else
+            target = type(label) == "string" and _G[label] or nil
+            if type(target) ~= "table" or type(target.GetObjectType) ~= "function" then
+                ns.Say(("there is no frame named %s. /mint uidump mouse records what the mouse is over."):format(tostring(label)))
+                return nil
+            end
+        end
+        local name = select(2, pcall(target.GetName, target))
+        if type(name) ~= "string" then name = tostring(label) end
+        local out = record("frame", name, { { name, 6 } })
+        out.mouse = path
+        ns.Say(("recorded %s (%d frames and textures)%s. Type /reload to write it to the save file."):format(name, out.count,
+            path and (", the mouse over " .. path) or ""))
+        return out
+    end
+    if group == "all" then
+        local taken, total, missing = {}, 0, {}
+        for _, name in ipairs(ORDER) do
+            local out = record(name == "screen" and nil or name)
+            taken[#taken + 1] = ("%s %d"):format(name, out.found)
+            total = total + out.count
+            for _, root in ipairs(out.missing) do missing[#missing + 1] = root end
+        end
+        ns.DB().uiDump = ns.DB().uiDumps.screen
+        ns.Say(("recorded every group on build %s (%s; %d frames and textures in all; %d names this client does not have or had not opened). "
+            .. "Type /reload to write it to the save file."):format(tostring(ns.DB().uiDump.build), table.concat(taken, ", "), total, #missing))
+        return ns.DB().uiDumps
+    end
+    local out = record(group, label)
+    ns.Say(("recorded %d of the game's frames on build %s%s (%d frames and textures in all; %d names this client does not have). "
+        .. "Type /reload to write it to the save file."):format(out.found, tostring(out.build), out.label and (' as "' .. out.label .. '"') or "", out.count, #out.missing))
     return out
 end
