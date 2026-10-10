@@ -47,7 +47,7 @@ WRITE_FIXTURES = "--write-fixtures" in sys.argv
 FIXTURE_DIR = Path(__file__).resolve().parent / "fixtures"
 
 # What the website's item database reads from an item (docs/item-export-format-v1.md).
-ITEM_KEYS = ["id", "name", "quality", "itemLevel", "itemClass", "itemSubclass", "equipLoc", "icon", "stats"]
+ITEM_KEYS = ["id", "name", "quality", "itemLevel", "itemClass", "itemSubclass", "equipLoc", "icon", "stats", "drops"]
 
 # ---------------------------------------------------------------------------
 # Lua side: mocked WoW environment. Chunks are loaded with loadstring + setfenv so the
@@ -262,6 +262,7 @@ local env = {
   GetGuildInfo = function() return "My Guild", "Officer", 1 end,
   GetCurrentRegion = function() return 1 end,
   GetBuildInfo = function() return "1.60.1", "60101", "Sep 1 2026", 16001 end,
+  GetLocale = function() return "enUS" end,
   GetInventoryItemLink = function(unit, slot) return links[slot] end,
   GetInventoryItemQuality = function(unit, slot) return qualities[slot] end,
   GetInventoryItemTexture = function(unit, slot)
@@ -289,6 +290,7 @@ local env = {
   -- loot
   GetServerTime = function() return CLOCK end,
   GetRealZoneText = function() return "Molten Core" end,
+  GetInstanceInfo = function() return "Molten Core", "raid", 0, "40 Player", 40, 0, false, 409, nil end,
   GetNumLootItems = function() return #LOOT_WINDOW end,
   GetLootSlotLink = function(i) return LOOT_WINDOW[i] and LOOT[LOOT_WINDOW[i].id].link end,
   GetLootSlotInfo = function(i) local s = LOOT_WINDOW[i]; if s then return "icon", "name", s.quantity or 1 end end,
@@ -1037,6 +1039,11 @@ if VARIANT == "mainline" then
 end
 
 -- 2. A corpse with two blades, three herbs in one stack, and an item the client has not loaded.
+-- The corpse is the dead target (Hogger), in Molten Core: where the drops came from is written
+-- on each item, for the website; the loot tracker does not show it.
+local unitIsDead, unitExists = env.UnitIsDead, env.UnitExists
+env.UnitIsDead = function(u) return u == "target" end
+env.UnitExists = function() return true end
 CLOCK = CLOCK + 60
 LOOT_WINDOW = { { id = 18832, guid = "Creature-0-1" }, { id = 18832, guid = "Creature-0-1" },
                 { id = 765, quantity = 3, guid = "Creature-0-1" }, { id = 20725, guid = "Creature-0-1" } }
@@ -1047,6 +1054,21 @@ assert(logSize() == savedBefore + 5, "two blades, a stack of herbs and the cryst
 LOOT_WINDOW = { { id = 18832, guid = "Creature-0-1" }, { id = 765, quantity = 3, guid = "Creature-0-1" } }
 fire("LOOT_OPENED")
 assert(logSize() == savedBefore + 5, "re-opening a corpse adds nothing")
+do
+  local blade = env.MintCommunityToolsDB.items[18832]
+  local line = blade.drops and blade.drops["Hogger|Molten Core|raid"]
+  assert(line and line.from == "Hogger" and line.zone == "Molten Core" and line.instance == "raid" and line.times == 1, "the blades dropped from Hogger in Molten Core, once (one corpse, opened twice)")
+  -- a chest, or a corpse looted after retargeting: nothing dead targeted, no source; nor
+  -- when what is targeted is a dead player
+  env.UnitIsDead = function() return false end
+  assert(ns.Loot.Source() == nil, "nothing dead targeted: no source")
+  env.UnitIsDead = function(u) return u == "target" end
+  local unitIsPlayer = env.UnitIsPlayer
+  env.UnitIsPlayer = function() return true end
+  assert(ns.Loot.Source() == nil, "a dead player targeted: no source")
+  env.UnitIsPlayer = unitIsPlayer
+  assert(ns.Loot.Source().from == "Hogger", "and a dead creature again")
+end
 
 -- 3. One blade goes to a group member: that fills in the drop, it does not add one.
 CLOCK = CLOCK + 5
@@ -1067,6 +1089,7 @@ LOOT_WINDOW = { { id = 16800, quantity = 2, guid = "Creature-0-2" } }
 fire("LOOT_OPENED")
 assert(logSize() == savedBefore + 7, "a line and then its window are one entry")
 
+env.UnitIsDead, env.UnitExists = unitIsDead, unitExists
 -- 6. The client loads the crystal's details late.
 LOOT[20725].info = { 3, 60, "Gem", "Simple", "", 134104 }
 fire("GET_ITEM_INFO_RECEIVED", 20725, true)
@@ -1124,6 +1147,46 @@ assert(#out.chatOpened == 1 and out.chatOpened[1] == first.entry.link, "shift-cl
 CHAT_OPEN = true
 MODIFIER = nil
 local linked = out.chatLinks[1]
+
+-- Export dungeons: the group finder's instances with their level bands, one string. The finder
+-- answers for a sparse set of ids; an entry without a level band, and an id with no name, are
+-- left out; a type that is neither dungeon nor raid is "other".
+local FINDER = {
+  [5] = { "Deadmines", 1, 0, 15, 25, 18, 0, 0, 0, 0, "", 0, 5 },
+  [7] = { "Molten Core", 2, 0, 55, 60, 60, 0, 0, 0, 0, "", 0, 40 },
+  [9] = { "Some Holiday Thing", 3, 0, 1, 60, 0, 0, 0, 0, 0, "", 0, 0 },
+  [11] = { "Broken Entry", 1, 0, 0, 0, 0 },
+  [3271] = { "City of Dalaran", 1, 0, 55, 60, 58, 0, 0, 0, 0, "", 0, 5 },
+  -- as the WoW Forever client answers: type 0, one level, no player count
+  [3272] = { "Ruins of Lordaeron", 0, 0, 15, 15, 27, 27, 27, 0, 0, nil, 0, 0 },
+  [57] = { "Elwynn Forest", 4, 0, 0, 0, 1, 1, 1, 0, 0, nil, 0, 0 },
+}
+env.GetLFGDungeonInfo = function(id) local d = FINDER[id]; if d then return unpack(d, 1, 13) end return nil end
+slash("dungeons")
+local dungeonsString = ns.ui.box.editBox:GetText()
+local dungeonsStatus = ns.ui.status:GetText()
+assert(ns.UI.CurrentTab() == "gear" and dungeonsString:find("^GAE1:") and dungeonsStatus:find("5 instances", 1, true), "/mint dungeons puts the string in the box: " .. dungeonsStatus)
+click("MintCommunityToolsExportDungeonsButton")
+assert(ns.ui.box.editBox:GetText() == dungeonsString, "the Gear tab's button gives the same string")
+env.GetLFGDungeonInfo = nil
+click("MintCommunityToolsExportDungeonsButton")
+assert(ns.ui.box.editBox:GetText() == "" and ns.ui.status:GetText():find("no group finder list", 1, true), "a client without the finder: said, nothing exported")
+env.GetLFGDungeonInfo = function() return nil end
+click("MintCommunityToolsExportDungeonsButton")
+assert(ns.ui.status:GetText():find("lists no instances", 1, true), "a finder that lists nothing: said")
+env.GetLFGDungeonInfo = nil
+
+-- /mint uidump finder: the finder's answers, raw and in order, for reading a client whose
+-- order differs from the retail one.
+env.GetLFGDungeonInfo = function(id) local d = FINDER[id]; if d then return unpack(d, 1, 13) end return nil end
+env.TYPEID_DUNGEON = 1
+slash("uidump finder")
+do
+  local f = env.MintCommunityToolsDB.uiDumps.finder
+  assert(f and f.count == 7 and f.has == "function" and f.entries["5"][1] == "Deadmines" and f.entries["5"][2] == "1" and f.entries["5"][13] == "5", "every instance's answers, as text, in order")
+  assert(f.entries["11"][4] == "0" and f.entries["9"] and f.constants.TYPEID_DUNGEON == 1, "entries without a band too, and the type constants")
+end
+env.GetLFGDungeonInfo, env.TYPEID_DUNGEON = nil, nil
 
 -- Export new items: a string to paste on the website. Nothing counts as exported until Done.
 local hintBefore = ns.lootui.hint:GetText()
@@ -2533,6 +2596,7 @@ if S.enabled then
       assert(rawget(pinArt, "_alpha") == nil and not M.dressed[pin], "the map and its pins are left alone, even one that looks like a button")
       -- the second pass, from the records taken after the first: what the windows still showed
       local function atlasArt(atlas) local t = MENU.art(); rawset(t, "_atlas", atlas); rawset(t, "GetAtlas", function(self) return rawget(self, "_atlas") end); return t end
+      do   -- (each round in a block of its own: Lua allows 200 locals at a time)
       -- a side tab that is a button, with no open mark of its own (the friends window)
       local friendTab = MENU.typed(stub(), "Button")
       local friendTabBg, friendTabIcon = atlasArt("common-sidetab"), atlasArt("friends-icon-tab-friends")
@@ -2592,8 +2656,10 @@ if S.enabled then
       assert(lineArt._alpha == 0, "the lines a list draws between its rows are gone")
       assert(M.dressed[paneToggle] and M.dressed[pinBtn] and pinBg._alpha == 0 and pinBorder._alpha == 0 and rawget(pinIcon, "_alpha") == nil, "the stats toggle and the map's pin button are flat squares, the pin's picture kept")
       assert(M.dressed[panelClose] and M.dressed[maxBtn], "the side panel's toggle and the maximize button are flat squares with a mark")
+      end
       -- the third round (the guild and Legacy windows): a row in a scrolling list with a
       -- picture behind it, and a card that happens to be a large CheckButton
+      do
       local listBox, listTarget = MENU.typed(stub(), "Frame"), MENU.typed(stub(), "Frame")
       rawset(listBox, "ScrollTarget", listTarget)
       local rowBtn = MENU.typed(stub(), "Button")
@@ -2619,6 +2685,100 @@ if S.enabled then
       assert(M.dressed[rowBtn] and rowBg._alpha == 0 and rowLit._alpha == 0 and rawget(rowIcon, "_alpha") == nil, "a list row loses the picture behind it and what lights up on it, and keeps its icon")
       assert(M.dressed[bigCheck] and bigBg._alpha == 0 and bigRing._alpha == 0 and rawget(bigTick, "_texture") == nil, "a card that is a large CheckButton is a card, not a check box: no tick is drawn on it")
       env.CommunitiesFrame = nil
+      end
+      -- the spellbook (a fourth record): page art, tabs with a picture, entries on backplates,
+      -- the page-turning arrows, and a maximize holder by another name
+      do
+      local book = MENU.typed(stub("PlayerSpellsFrame"), "Frame")
+      local pageArt = atlasArt("spellbook-Page-Left-C60")
+      local bookPage = MENU.holding(MENU.typed(stub(), "Frame"), { pageArt })
+      rawset(book, "SpellBookFrame", bookPage)
+      local bookTab = MENU.typed(stub(), "Button")
+      local tabSquare, tabPic, tabActive = atlasArt("spellbook-Tab-Frame-C60"), MENU.art(), atlasArt("spellbook-Tab-Frame-Glow-C60")
+      rawset(bookTab, "Icon", tabPic); rawset(bookTab, "SquareBackground", tabSquare); rawset(bookTab, "SquareBackgroundActive", tabActive)
+      MENU.holding(bookTab, { tabSquare, tabPic, tabActive })
+      local entry = MENU.typed(stub(), "Frame")
+      local plate, spellBtn = atlasArt("spellbook-item-backplate"), MENU.typed(stub(), "Button")
+      local spellBorder = atlasArt("spellbook-item-iconframe")
+      rawset(spellBtn, "Border", spellBorder); rawset(spellBtn, "Icon", MENU.art())
+      MENU.holding(spellBtn, { spellBorder })
+      rawset(entry, "Backplate", plate); rawset(entry, "Button", spellBtn)
+      MENU.holding(entry, { plate }, { spellBtn })
+      local heading = MENU.typed(stub(), "Frame")
+      local headPlate, divider = atlasArt("spellbook-list-backplate"), atlasArt("spellbook-divider")
+      rawset(heading, "Backplate", headPlate); rawset(heading, "Border", divider)
+      MENU.holding(heading, { headPlate, divider })
+      local paged, controls = MENU.typed(stub(), "Frame"), MENU.typed(stub(), "Frame")
+      local prevBtn = MENU.holding(MENU.typed(stub(), "Button"), { MENU.art() })
+      rawset(controls, "PrevPageButton", prevBtn); rawset(paged, "PagingControls", controls)
+      rawset(bookPage, "PagedSpellsFrame", paged)
+      -- the entries sit on a page of their own, as in the client (not straight under the book)
+      local view = MENU.holding(MENU.typed(stub(), "Frame"), {}, { entry, heading })
+      MENU.holding(paged, {}, { controls, view })
+      MENU.holding(bookPage, { pageArt }, { bookTab, paged })
+      local sizerB = MENU.typed(stub(), "Frame")
+      local minBtn = MENU.holding(MENU.typed(stub(), "Button"), { MENU.art() })
+      rawset(sizerB, "MinimizeButton", minBtn); rawset(book, "MaximizeMinimizeButton", sizerB)
+      local talentsArt = atlasArt("talents-background-generic")
+      local talents = MENU.holding(MENU.typed(stub(), "Frame"), { talentsArt })
+      rawset(talents, "_shown", false)   -- hidden below level 10
+      rawset(book, "TalentsFrame", talents)
+      MENU.holding(book, {}, { bookPage, sizerB, talents })
+      env.PlayerSpellsFrame = book
+      M.DressAll()
+      assert(M.windows.PlayerSpellsFrame and M.windows.PlayerSpellsFrame.error == nil, "the spellbook is dressed without an error: " .. tostring(M.windows.PlayerSpellsFrame and M.windows.PlayerSpellsFrame.error))
+      assert(pageArt._alpha == 0 and talentsArt._alpha == 0, "the page art is gone, the talents page's too, hidden or not")
+      assert(M.dressed[bookTab] and tabSquare._alpha == 0 and rawget(tabPic, "_alpha") == nil and tabActive._texture == "Interface\\Buttons\\WHITE8X8", "a tab with a picture is a flat square with it, the open one washed in the accent colour")
+      assert(plate._alpha == 0 and rawget(spellBorder, "_alpha") == nil, "an entry loses its backplate and keeps its spell button's frame")
+      assert(headPlate._alpha == 0 and divider._alpha == 0, "a heading loses its backplate and its divider")
+      assert(M.dressed[prevBtn] and M.dressed[minBtn], "the page arrow and the minimize button are flat squares with a mark")
+      -- the page fills itself again while the window stays open (sorted, turned): a row that
+      -- appears then is dressed within a couple of seconds, by the look the piece takes at
+      -- the windows on screen
+      local lateEntry = MENU.typed(stub(), "Frame")
+      local latePlate = atlasArt("spellbook-item-backplate")
+      rawset(lateEntry, "Backplate", latePlate)
+      MENU.holding(lateEntry, { latePlate })
+      MENU.holding(view, {}, { entry, heading, lateEntry })
+      rawset(book, "_shown", true)
+      local tick = M.events._scripts.OnUpdate
+      tick(M.events, 1)
+      assert(rawget(latePlate, "_alpha") == nil, "not before the time is up")
+      tick(M.events, 1.1)
+      assert(latePlate._alpha == 0, "a row that appeared later is dressed at the next look")
+      rawset(book, "_shown", false)
+      local before = M.RedressShown()
+      assert(before == 0, "a window that is not on screen is left: " .. before)
+      env.PlayerSpellsFrame = nil
+      end
+      -- A tab whose art fills only the bottom of its button (the Options window's Base and
+      -- Raid tabs, 23px of art on a 37px button, edge to edge): the flat panel is drawn
+      -- where the art was, a pixel in from the sides, so it does not run over the tab beside it.
+      do
+      local tabBtn = MENU.typed(stub(), "Button")
+      local l, m, r = atlasArt("Options_Tab_Left"), atlasArt("Options_Tab_Middle"), atlasArt("Options_Tab_Right")
+      rawset(m, "GetHeight", function() return 23 end)
+      rawset(tabBtn, "GetHeight", function() return 37 end)
+      rawset(tabBtn, "Left", l); rawset(tabBtn, "Middle", m); rawset(tabBtn, "Right", r)
+      MENU.holding(tabBtn, { l, m, r })
+      local holder = MENU.holding(MENU.typed(stub(), "Frame"), {}, { tabBtn })
+      M.DressInside(holder)
+      local d = M.dressed[tabBtn]
+      assert(d and d.tab, "a tab by its art")
+      local tl, br = d.bg._pointsBy.TOPLEFT, d.bg._pointsBy.BOTTOMRIGHT
+      assert(tl[4] == 1 and tl[5] == -14 and br[4] == -1 and br[5] == 0, "its panel covers the art's 23px at the bottom, a pixel in: " .. tl[4] .. "," .. tl[5] .. " / " .. br[4] .. "," .. br[5])
+      assert(d.edges[1]._pointsBy.TOPLEFT[5] == -14 and d.edges[2]._pointsBy.BOTTOMLEFT[5] == 0, "and so do its edges")
+      -- a tab whose art is as tall as its button is covered whole, as before
+      local whole = MENU.typed(stub(), "Button")
+      local wl, wm, wr = atlasArt("uiframe-tab-left"), atlasArt("_uiframe-tab-center"), atlasArt("uiframe-tab-right")
+      rawset(wm, "GetHeight", function() return 36 end)
+      rawset(whole, "GetHeight", function() return 36 end)
+      rawset(whole, "Left", wl); rawset(whole, "Middle", wm); rawset(whole, "Right", wr)
+      MENU.holding(whole, { wl, wm, wr })
+      M.DressInside(MENU.holding(MENU.typed(stub(), "Frame"), {}, { whole }))
+      local wd = M.dressed[whole]
+      assert(wd.bg._pointsBy.TOPLEFT[4] == 0 and wd.bg._pointsBy.TOPLEFT[5] == 0, "a tab covered whole")
+      end
       env.CharacterFrame, env.CharacterFrameLeftPaneHost, env.CharacterFrameCloseButton, env.WorldMapFrame, env.CharacterFrameRightPaneToggleButton = nil, nil, nil, nil, nil
     end
     env.MacroFrame = nil   -- the harness's own, not a global the addon made
@@ -2772,9 +2932,19 @@ if S.enabled then
       B.events._scripts.OnUpdate(B.events, 0.2)
       assert(B.lootCount == 1 and M.windows.LootFrame and M.dressed[loot] and lootArt._alpha == 0 and M.dressed[take], "the loot window is flat, found when it first opens")
       local more, moreArt = MENU.pushButton("Center")
-      MENU.holding(loot, { lootArt }, { take, more })
+      -- a row as the client builds one: a card with a stroke and a rarity tag, the item's slot in it
+      local rowCard = MENU.typed(stub(), "Frame")
+      local cardBg, stroke, tag, slotIcon = MENU.art(), MENU.art(), MENU.art(), MENU.art()
+      local slot = MENU.typed(stub(), "Button")
+      rawset(slot, "IconBorder", MENU.art()); rawset(slot, "icon", slotIcon)
+      MENU.holding(slot, { slotIcon })
+      rawset(rowCard, "NameFrame", cardBg); rawset(rowCard, "BorderFrame", stroke); rawset(rowCard, "QualityStripe", tag); rawset(rowCard, "Item", slot)
+      MENU.holding(rowCard, { cardBg, stroke, tag }, { slot })
+      MENU.holding(loot, { lootArt }, { take, more, rowCard })
       loot:Open()
       assert(M.dressed[more] and moreArt._alpha == 0, "what it holds is dressed again each time it fills itself")
+      assert(M.dressed[rowCard] and cardBg._alpha == 0 and stroke._alpha == 0 and tag._alpha == 0, "a loot row loses its card, stroke and rarity tag")
+      assert(M.dressed[slot] and (rawget(slotIcon, "_alpha") or 1) == 1, "and the item's slot in it is flat, its picture shown: " .. tostring(rawget(slotIcon, "_alpha")))
       assert(B.count == 1 and B.Check() == false, "it is not one of the bag windows: the bag window's box is not for it")
       env.LootFrame = nil
     end
@@ -3275,7 +3445,7 @@ local RESULT = jsonEncode({ prints = out.prints, export = exportText, json = jso
   minimapRadius = minimapRadius, minimapStart = minimapStart, watchAtLogin = watchAtLogin,
   entries = entries, drops = drops, itemsSeen = itemsSeen, minimapLines = minimapLines,
   rowsUncommon = rowsUncommon, countUncommon = countUncommon, rowsAll = rowsAll, countAll = countAll,
-  filterLabels = filterLabels, linked = linked, itemsString = itemsString, itemsStatus = itemsStatus,
+  filterLabels = filterLabels, linked = linked, itemsString = itemsString, itemsStatus = itemsStatus, dungeonsString = dungeonsString,
   doneStatus = doneStatus, nothingStatus = nothingStatus, changedString = changedString, allString = allString,
   hintBefore = hintBefore, hintAfter = hintAfter, chunks = chunks, chunkStatus = chunkStatus,
   chunkButtons = chunkButtons, chunkDone = chunkDone, watchButton = watchButton, state = state,
@@ -3440,6 +3610,31 @@ def check_gear(result, variant):
     return data
 
 
+def check_dungeons(result, variant):
+    """The dungeons export as the website's class-data importer reads it (docs/class-data-format-v1.md)."""
+    doc, raw = decode(result["dungeonsString"])
+    ordered = json.loads(raw.decode("utf-8"), object_pairs_hook=lambda pairs: pairs)
+    assert [k for k, _ in ordered] == sorted(k for k, _ in ordered), "keys in sorted order"
+    assert doc["v"] == 1 and doc["kind"] == "dungeons" and isinstance(doc["ts"], int)
+    assert doc["addon"] == {"name": "MintCommunityTools", "version": VERSION}
+    assert doc["game"] == {"version": "1.60.1", "build": "60101"}, doc["game"]
+    assert doc["locale"] == "enUS", doc.get("locale")
+    char = doc["character"]
+    assert char["classFile"] == "WARRIOR" and char["class"] == "Warrior" and isinstance(char["level"], int), char
+    assert set(char) <= {"classFile", "class", "raceFile", "race", "faction", "level"}, char
+    entries = doc["dungeons"]
+    assert [e["id"] for e in entries] == [5, 7, 9, 3271, 3272], [e["id"] for e in entries]
+    forever = entries[4]
+    assert forever == {"id": 3272, "name": "Ruins of Lordaeron", "type": "dungeon", "minLevel": 15, "maxLevel": 15, "recLevel": 27}, forever
+    assert entries[0] == {"id": 5, "name": "Deadmines", "type": "dungeon", "minLevel": 15, "maxLevel": 25, "recLevel": 18, "players": 5}, entries[0]
+    assert entries[1]["type"] == "raid" and entries[1]["players"] == 40
+    assert entries[2]["type"] == "other" and "recLevel" not in entries[2] and "players" not in entries[2], entries[2]
+    assert entries[3]["name"] == "City of Dalaran" and entries[3]["minLevel"] == 55 and entries[3]["maxLevel"] == 60
+    for e in entries:
+        assert 1 <= e["minLevel"] <= e["maxLevel"] <= 100 and None not in e.values(), e
+    assert len(result["dungeonsString"]) < 4096, "a few KB"
+
+
 def check_loot(result, variant):
     saved = 0 if variant == "forever" else 1      # classic and mainline start with one saved drop
     me = "Théoden Stormwind" if variant == "forever" else "Théoden"
@@ -3523,12 +3718,17 @@ def check_item_export(result, variant, saved):
     assert result["itemsSeen"] == len(items)
     assert items[16800] == {"id": 16800, "name": "Arcanist Boots", "quality": 4, "itemLevel": 66, "itemClass": "Armor",
                             "itemSubclass": "Cloth", "equipLoc": "INVTYPE_FEET", "icon": 132541,
-                            "stats": {"ITEM_MOD_STAMINA_SHORT": 13, "ITEM_MOD_INTELLECT_SHORT": 14}}, items[16800]
+                            "stats": {"ITEM_MOD_STAMINA_SHORT": 13, "ITEM_MOD_INTELLECT_SHORT": 14},
+                            "drops": [{"from": "Hogger", "zone": "Molten Core", "instance": "raid", "times": 1}]}, items[16800]
+    # where an item dropped: one line per creature and place, corpses counted; nothing for the crystal's late details
+    assert items[18832]["drops"] == [{"from": "Hogger", "zone": "Molten Core", "instance": "raid", "times": 1}], items[18832]["drops"]
+    assert items[765]["drops"] == items[18832]["drops"], "the herbs came off the same corpse; the chest added nothing"
     assert items[18832]["stats"]["ITEM_MOD_DAMAGE_PER_SECOND_SHORT"] == 56.5 and items[18832]["itemSubclass"] == "One-Handed Swords"
+    hogger = [{"from": "Hogger", "zone": "Molten Core", "instance": "raid", "times": 1}]
     assert items[765] == {"id": 765, "name": "Silverleaf", "quality": 1, "itemLevel": 5, "itemClass": "Trade Goods",
-                          "itemSubclass": "Herb", "icon": "Interface\\Icons\\INV_Misc_Herb_10"}, items[765]
+                          "itemSubclass": "Herb", "icon": "Interface\\Icons\\INV_Misc_Herb_10", "drops": hogger}, items[765]
     assert items[20725] == {"id": 20725, "name": "Uncached Crystal", "quality": 3, "itemLevel": 60, "itemClass": "Gem",
-                            "itemSubclass": "Simple", "icon": 134104}, items[20725]
+                            "itemSubclass": "Simple", "icon": 134104, "drops": hogger}, items[20725]
     assert doc["items"][0]["id"] == 16800, "most recently seen first"
     if saved:
         assert items[11726] == {"id": 11726, "name": "Savage Gladiator Chain", "quality": 3, "itemLevel": 55}, "from the last session"
@@ -3734,6 +3934,7 @@ def run_variant(lua, variant, workdir):
     check_gear(result, variant)
     check_minimap(result, variant)
     check_loot(result, variant)
+    check_dungeons(result, variant)
     check_overhaul(result, variant)
 
     if WRITE_FIXTURES:
@@ -3741,6 +3942,7 @@ def run_variant(lua, variant, workdir):
         (FIXTURE_DIR / f"character-{variant}.txt").write_text(result["export"] + "\n", encoding="utf-8")
         if variant == "forever":
             (FIXTURE_DIR / "items-forever.txt").write_text(result["itemsString"] + "\n", encoding="utf-8")
+            (FIXTURE_DIR / "dungeons-forever.txt").write_text(result["dungeonsString"] + "\n", encoding="utf-8")
             (FIXTURE_DIR / "items-forever-part-2-of-3.txt").write_text(result["chunks"][1] + "\n", encoding="utf-8")
     return len(result["export"])
 

@@ -50,6 +50,20 @@ What a class learns, read at a **class trainer** with the "unavailable" filter o
 
 The website merges spellbook exports for a class by `spellId`, else by `name` + `rank`: `level` and `cost` from any trainer export that has them (they don't vary by character); `text` and `lines` from the **highest-level** exporting character, since the numbers scale; a spell's tab from any export that knew it. A spell present in one race's export and absent from another's of the same class (a Human Priest's *Desperate Prayer*) is marked as that race's, which is how per-race class spells are found without a special export.
 
+## `kind: "dungeons"` (added 2026-10-10)
+
+The group finder's dungeon list with each instance's **level band**. The website reads every dungeon and raid, and its bosses, from the client's own data files, but the table that holds the level bands is not in the beta build's files, so the bands come from the game through this export. One export covers every instance; it does not depend on the character beyond the common `character` block (`locale`, `addon`, `game` and `character` as above; `by` is not sent).
+
+How the addon reads it: `GetLFGDungeonInfo(id)` for `id` from 1 to 5000 (the Classic list is sparse; the WoW Forever instances sit near 3270 today), keeping every id that returns a name and a level band. It returns `name, typeID, subtypeID, minLevel, maxLevel, recLevel, minRecLevel, maxRecLevel, expansionLevel, groupID, textureFilename, difficulty, maxPlayers, description, isHoliday, …`. `typeID` 1 is `"dungeon"`, 2 is `"raid"`, anything else `"other"` (the website skips those). If the list is empty on this client, the addon says so instead of exporting.
+
+**What the WoW Forever client answers** (build 70338, `/mint uidump finder`): `typeID` is 0 for every dungeon and raid alike (4 for a zone, 5 for a battleground), `maxPlayers` is 0, and `minLevel`, `maxLevel` and `recLevel` are one and the same number for nearly every instance (Deadmines 16, Scholomance 57, Molten Core 60: the level to enter at; Ruins of Lordaeron has 15 and a `recLevel` of 27). So from this client an entry carries `type: "dungeon"` for raids too (the website tells them apart by its own places), `minLevel` equal to `maxLevel`, `recLevel` where it differs, and no `players`.
+
+| Key | Type | Notes |
+|-----|------|-------|
+| `dungeons` | array | One object per finder entry: `id` (the finder's dungeon ID), `name` (localized), `type` (`"dungeon"`, `"raid"`, `"other"`), `minLevel`, `maxLevel` (1..100, min ≤ max), `recLevel` (optional), `players` (`maxPlayers`, optional). Unknown values are omitted. |
+
+The website matches `name` against its own list of places (the client's map names, which differ a little from the finder's: "Stormwind Stockades" is "The Stockade" there, "Zul'Farak" is a one-letter slip of "Zul'Farrak"; a few aliases and a one-letter tolerance cover it), writes the band, and lists in the preview whatever matched nothing so the aliases can grow. A raid's `players` fills a missing raid size.
+
 ## `kind: "racials"`
 
 A character's racials, read from the **General** tab of its own spellbook. In Classic-style clients a racial's tooltip carries the words `Racial` or `Racial Passive` on its type line; the addon includes every General-tab spell and sets `racial: true` on the ones whose tooltip says so, so the website can tell *Blood Fury* from *Attack* without a list. (If this client's tooltips lack that line, the addon sets `racial` on nothing and the website falls back to "General-tab spells that no other race of this class has" across several exports; either way, send the whole tab.)

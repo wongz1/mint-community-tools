@@ -127,8 +127,8 @@ end
 -- a corpse or a chest holds) and the vendor's window. A flat panel, flat buttons and tabs,
 -- items in plain slots with the border in the colour of their quality. Each fills itself
 -- when it opens and as its pages are turned. Built without a look at this client's loot and
--- vendor windows at first; the vendor's was then checked against /mint uidump vendor on build
--- 70334, the loot window's rows are still unseen (/mint uidump loot with one open).
+-- vendor windows at first; both were then checked against /mint uidump records on build 70334
+-- (the loot window's rows are dressed by the window dressing, as loot cards).
 local LOOT_WINDOWS = { "LootFrame", "MerchantFrame" }
 local LOOT_RELAYS = { LootFrame = { "Open", "Update" }, MerchantFrame = {} }
 -- The vendor's window is filled by functions of the game's that are not the window's own.

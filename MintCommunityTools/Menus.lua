@@ -61,6 +61,7 @@ local WINDOWS = {
     "EditModeUnsavedChangesDialog",
     -- the game's own windows, from the micro menu: seen in /mint uidump on build 70334
     "CharacterFrame", "WorldMapFrame", "CommunitiesFrame", "SocialUIFrame", "ProfessionsFrame", "LegacySystemFrame",
+    "PlayerSpellsFrame",
 }
 Menus.WINDOWS = WINDOWS
 -- Parts of a window that hold nothing but background art (a stone wall behind the character,
@@ -75,6 +76,9 @@ local ART_HOLDERS = {
                          "ClubFinderGuildFinderFrame.DisabledFrame" },
     LegacySystemFrame = { ".RewardTrackPage", ".TreePage", ".TreePage.LegacyTreePointSummary", ".TreePage.VerticalDivider",
                           ".ChallengesPage.VerticalDivider" },
+    -- the Talents page is unseen (it opens at level 10): its own art is swept like the Legacy
+    -- window's tree page, which is built from the same parts; its talent nodes are left alone
+    PlayerSpellsFrame = { ".SpellBookFrame", ".TalentsFrame" },
 }
 -- Parts of a window that are left entirely alone: the map itself and the pins on it.
 local LEAVE = {
@@ -89,11 +93,20 @@ local PLAIN_BUTTONS = {
 local EXTRA_MARKS = {
     WorldMapFrame = { { ".SidePanelToggle.CloseButton", ">", 6 }, { ".SidePanelToggle.OpenButton", "<", 6 } },
     CharacterFrame = { { "CharacterFrameRightPaneToggleButton", "=", 4 } },
+    PlayerSpellsFrame = { { ".SpellBookFrame.PagedSpellsFrame.PagingControls.PrevPageButton", "<", 8 },
+                          { ".SpellBookFrame.PagedSpellsFrame.PagingControls.NextPageButton", ">", 8 } },
 }
 -- Windows that fill themselves again while they are open: dressed again after these.
 local REFILLS = {
     EditModeSystemSettingsDialog = { "UpdateSettings", "UpdateButtons", "UpdateExtraButtons", "AttachToSystemFrame" },
 }
+-- Windows that fill themselves again while they stay open, through functions the addon has
+-- no name for (a page of the spellbook sorted or turned, a list of friends refreshed): while
+-- one of these is shown it is dressed again every so often. Dressing is cheap and does
+-- nothing twice.
+local REDRESS_SHOWN = { "PlayerSpellsFrame", "CharacterFrame", "CommunitiesFrame", "SocialUIFrame", "ProfessionsFrame",
+                        "LegacySystemFrame", "WorldMapFrame" }
+Menus.REDRESS_EVERY = 2
 -- The parts of a window its art is kept in. A part may be a frame or a single texture.
 local PARTS = { "NineSlice", "Border", "BorderBox", "Bg", "BG", "Background", "Inset", "Header", "TopTileStreaks", "PortraitContainer", "TitleBg" }
 local CLOSE = { "CloseButton", "ClosePanelButton" }
@@ -258,22 +271,26 @@ local function flat(f, bg, inset)
     if type(f.CreateTexture) ~= "function" then return nil end
     local W = ns.W
     local px = W.pixel()
+    -- the panel sits `inset` in from the frame's sides: one number for all four, or
+    -- { left, right, top, bottom } (a tab whose art fills only the bottom of its button)
     local i = inset or 0
+    local left, right, top, bottom = i, i, i, i
+    if type(i) == "table" then left, right, top, bottom = i[1] or 0, i[2] or 0, i[3] or 0, i[4] or 0 end
     d = { edges = {}, inset = i }
     d.bg = f:CreateTexture(nil, "BACKGROUND", nil, -8)
-    d.bg:SetPoint("TOPLEFT", f, "TOPLEFT", i, -i)
-    d.bg:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -i, i)
+    d.bg:SetPoint("TOPLEFT", f, "TOPLEFT", left, -top)
+    d.bg:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -right, bottom)
     W.colorTexture(d.bg, bg[1], bg[2], bg[3], bg[4])
     own[d.bg] = true
     local spans = {
         { "TOPLEFT", "TOPRIGHT", "SetHeight" }, { "BOTTOMLEFT", "BOTTOMRIGHT", "SetHeight" },
         { "TOPLEFT", "BOTTOMLEFT", "SetWidth" }, { "TOPRIGHT", "BOTTOMRIGHT", "SetWidth" },
     }
-    local sign = { TOPLEFT = { 1, -1 }, TOPRIGHT = { -1, -1 }, BOTTOMLEFT = { 1, 1 }, BOTTOMRIGHT = { -1, 1 } }
+    local at = { TOPLEFT = { left, -top }, TOPRIGHT = { -right, -top }, BOTTOMLEFT = { left, bottom }, BOTTOMRIGHT = { -right, bottom } }
     for n, span in ipairs(spans) do
         local e = f:CreateTexture(nil, "BORDER", nil, 7)
-        e:SetPoint(span[1], f, span[1], sign[span[1]][1] * i, sign[span[1]][2] * i)
-        e:SetPoint(span[2], f, span[2], sign[span[2]][1] * i, sign[span[2]][2] * i)
+        e:SetPoint(span[1], f, span[1], at[span[1]][1], at[span[1]][2])
+        e:SetPoint(span[2], f, span[2], at[span[2]][1], at[span[2]][2])
         e[span[3]](e, px)
         own[e] = true
         d.edges[n] = e
@@ -356,11 +373,23 @@ end
 
 -- A push button of the game's: its art gone, a flat square in its place, the border in the
 -- accent colour under the mouse. A tab is the same, with the open one's border lit.
+-- A tab's art sometimes fills only the bottom of its button (the Options window's Base and
+-- Raid tabs: 23px of art on a 37px button), and the tabs sit edge to edge. A flat panel the
+-- size of the button would run over the tab beside it: the panel is drawn where the art was.
+local function tabInsets(b)
+    local art = isType(b.Middle, "Texture") and b.Middle or (isType(b.Center, "Texture") and b.Center)
+    if not art or type(art.GetHeight) ~= "function" or type(b.GetHeight) ~= "function" then return nil end
+    local okA, artH = pcall(art.GetHeight, art)
+    local okB, h = pcall(b.GetHeight, b)
+    if not (okA and okB and type(artH) == "number" and type(h) == "number") or artH <= 0 or h - artH < 4 then return nil end
+    return { 1, 1, h - artH, 0 }
+end
+
 local function flatButton(b)
     local W = ns.W
     sweep(b)
     local first = not dressed[b]
-    local d = flat(b, W.COLOR.panel)
+    local d = flat(b, W.COLOR.panel, isTab(b) and tabInsets(b) or nil)
     if not d then return false end
     if first then
         d.tab = isTab(b)
@@ -832,6 +861,52 @@ local function flatListRow(b)
     return d ~= nil
 end
 
+-- A row of the loot window (seen in /mint uidump on build 70334): a frame with a card picture
+-- (NameFrame), a stroke around it (BorderFrame), the strokes lit when it is pointed at or
+-- pressed, a rarity tag (QualityStripe) and the item's slot (Item) in it. The pictures go;
+-- the item's name and rarity, and the slot with its quality border, stay.
+local LOOT_CARD_ART = { "NameFrame", "BorderFrame", "HighlightNameFrame", "PushedNameFrame", "QualityStripe" }
+local function isLootCard(f)
+    return isType(f.NameFrame, "Texture") and isType(f.Item, "Button")
+end
+
+local function flatLootCard(f)
+    for _, key in ipairs(LOOT_CARD_ART) do
+        if isType(f[key], "Texture") then hide(f[key]) end
+    end
+    return flat(f, NESTED) ~= nil
+end
+
+-- A tab with a picture on it (the spellbook's): a button with an Icon on a SquareBackground,
+-- and a SquareBackgroundActive lit on the open one. The square goes for a flat one, the icon
+-- stays, the open one is washed in the accent colour.
+local function isIconTab(b)
+    return isType(b, "Button") and isType(b.Icon, "Texture") and isType(b.SquareBackground, "Texture")
+end
+
+local function flatIconTab(b)
+    hide(b.SquareBackground)
+    if isType(b.SquareBackgroundActiveGlow, "Texture") then hide(b.SquareBackgroundActiveGlow) end
+    if isType(b.SquareBackgroundActive, "Texture") then paintBar(b.SquareBackgroundActive) end
+    local d = flat(b, ns.W.COLOR.panel, 2)
+    if d then hoverHooks(b) end
+    return d ~= nil
+end
+
+-- An entry on a page of the spellbook, and a heading there: a frame with a Backplate behind
+-- it (and a Border that is a divider). The plate and the divider go; the spell's button,
+-- whose frame says whether it is a spell or a passive, is left as it is.
+local function isPlated(f)
+    return isType(f.Backplate, "Texture")
+end
+
+local function flatPlated(f)
+    hide(f.Backplate)
+    local atlas = isType(f.Border, "Texture") and atlasOf(f.Border)
+    if atlas and atlas:lower():find("divider", 1, true) then hide(f.Border) end
+    return true
+end
+
 -- A small square button with a picture on it (the friends window's menu and party buttons,
 -- the map's pin button): its frame art goes, the picture stays, a flat square takes its place.
 local ICONS = { "Icon", "icon", "ActionIcon" }
@@ -920,6 +995,14 @@ dressInside = function(f, depth, budget)
                 deeper = true
             elseif isListRow(child) then
                 if flatListRow(child) then n = n + 1 end
+                deeper = true
+            elseif isLootCard(child) then
+                if flatLootCard(child) then n = n + 1 end
+                deeper = true
+            elseif isIconTab(child) then
+                if flatIconTab(child) then n = n + 1 end
+            elseif isPlated(child) then
+                if flatPlated(child) then n = n + 1 end
                 deeper = true
             elseif isIconButton(child) then
                 if flatIconButton(child) then n = n + 1 end
@@ -1055,7 +1138,8 @@ dressWindow = function(f, name)
         end
     end
     -- a window that can be made large or small: the two buttons for it, flat, with + and -
-    local sizer = type(f.MaximizeMinimizeFrame) == "table" and f.MaximizeMinimizeFrame or (border and border.MaximizeMinimizeFrame)
+    local sizer = type(f.MaximizeMinimizeFrame) == "table" and f.MaximizeMinimizeFrame or type(f.MaximizeMinimizeButton) == "table" and f.MaximizeMinimizeButton
+        or (border and border.MaximizeMinimizeFrame)
     if type(sizer) == "table" then
         for key, mark in pairs({ MaximizeButton = "+", MinimizeButton = "-" }) do
             local b = sizer[key]
@@ -1174,7 +1258,28 @@ function Menus.Apply()
         Menus.events:SetScript("OnEvent", function()
             if Menus.applied then Menus.count = Menus.DressAll() end
         end)
+        local elapsed = 0
+        Menus.events:SetScript("OnUpdate", function(_, dt)
+            elapsed = elapsed + (type(dt) == "number" and dt or 0)
+            if elapsed < Menus.REDRESS_EVERY then return end
+            elapsed = 0
+            Menus.RedressShown()
+        end)
     end
+end
+
+-- Dresses again every window of the REDRESS_SHOWN kind that is on screen. Returns how many.
+function Menus.RedressShown()
+    if not Menus.applied or off.menus then return 0 end
+    local n = 0
+    for _, name in ipairs(REDRESS_SHOWN) do
+        local f = frame(name)
+        if f and type(f.IsShown) == "function" then
+            local ok, shown = pcall(f.IsShown, f)
+            if ok and shown == true and pcall(Menus.Dress, f, name, "menus") then n = n + 1 end
+        end
+    end
+    return n
 end
 
 function Menus.OnEnteringWorld()

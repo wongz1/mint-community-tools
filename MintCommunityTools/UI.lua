@@ -623,6 +623,9 @@ local function buildGear(panel)
     ui.rescan:SetPoint("TOPLEFT", PAD, y)
     ui.export = button(panel, "MintCommunityToolsExportButton", "Export for website", 150, function() UI.Export(false) end)
     ui.export:SetPoint("LEFT", ui.rescan, "RIGHT", GAP, 0)
+    -- The group finder's instances with their level bands, for the website's dungeon pages.
+    ui.exportDungeons = button(panel, "MintCommunityToolsExportDungeonsButton", "Export dungeons", 130, function() UI.ExportDungeons() end)
+    ui.exportDungeons:SetPoint("LEFT", ui.export, "RIGHT", GAP, 0)
     y = y - BUTTON_H - GAP
 
     ui.hint = W.dim(panel, "", CW)
@@ -719,6 +722,22 @@ function UI.Show(tab)
     else
         ui.frame:Show()   -- OnShow draws the current tab
     end
+end
+
+-- The dungeons export into the copy box: every instance the group finder lists, with its
+-- level band (docs/class-data-format-v1.md, kind "dungeons"). It does not depend on the
+-- character; an officer pastes it in the class-data box on the website's Talents dashboard.
+function UI.ExportDungeons()
+    if not ui.frame then build() end
+    local str, count = ns.Collect.DungeonsExport()
+    if not str then
+        ui.box.Set(nil)
+        setStatus(count, true)
+        return false
+    end
+    ui.box.Set(str)
+    setStatus(("%d instances with their level bands. Paste this in the class-data box on the website's Talents dashboard."):format(count))
+    return true
 end
 
 function UI.Toggle()

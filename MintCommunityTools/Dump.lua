@@ -456,7 +456,47 @@ local function record(group, label, roots)
     return out
 end
 
+-- /mint uidump finder: what the group finder answers, raw, for every instance it lists (the
+-- values of GetLFGDungeonInfo in the order this client returns them), and the constants the
+-- client names its instance types by. For the dungeons export, whose contract assumed the
+-- order the retail client uses.
+local FINDER_VALUES_MOST, FINDER_IDS_MOST = 24, 5000
+local function finderInfo()
+    local out = { at = time(), group = "finder", addon = ns.VERSION, entries = {}, constants = {}, count = 0 }
+    if GetBuildInfo then out.version, out.build = GetBuildInfo() end
+    out.has = type(GetLFGDungeonInfo)
+    if out.has == "function" then
+        for id = 1, FINDER_IDS_MOST do
+            local values = { pcall(GetLFGDungeonInfo, id) }
+            if values[1] and type(values[2]) == "string" and values[2] ~= "" then
+                local row = {}
+                for i = 2, math.min(#values, FINDER_VALUES_MOST + 1) do
+                    local v = values[i]
+                    row[i - 1] = (issecretvalue and issecretvalue(v)) and "<secret>" or (v == nil and "nil" or tostring(v))
+                end
+                out.entries[tostring(id)] = row
+                out.count = out.count + 1
+            end
+        end
+    end
+    for k, v in pairs(_G) do
+        if type(k) == "string" and (k:find("^TYPEID_") or k:find("^LFG_SUBTYPEID_") or k:find("^LFG_TYPE") or k == "NUM_LFG_DUNGEON_TYPES")
+            and (type(v) == "number" or type(v) == "string") then
+            out.constants[k] = v
+        end
+    end
+    return out
+end
+
 function Dump.Run(group, label)
+    if group == "finder" then
+        local out = finderInfo()
+        local db = ns.DB()
+        db.uiDumps = type(db.uiDumps) == "table" and db.uiDumps or {}
+        db.uiDumps.finder = out
+        ns.Say(("recorded what the group finder answers for %d instances. Type /reload to write it to the save file."):format(out.count))
+        return out
+    end
     -- one frame, by its name or by pointing at it
     if group == "frame" or group == "mouse" then
         local target, path

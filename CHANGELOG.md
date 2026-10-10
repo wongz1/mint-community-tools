@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.5.8 - 2026-10-10
+
+- **Where loot dropped, in the item export.** When you open a corpse, the addon now notes
+  which creature it was (the dead one you have targeted) and where (the instance, or the
+  zone), and the item export carries that to the website, so its dungeon and raid pages can
+  list what drops where from what members actually loot. The loot tracker does not show it;
+  chests, nodes, mail and trades add nothing.
+- **Export dungeons.** A new button on the Gear tab (and `/mint dungeons`) exports every
+  instance the group finder lists, with its level band, as one string for the website: an
+  officer pastes it in the class-data box on the Talents dashboard, and the site's dungeon
+  and raid pages get their level bands from the game itself. It does not depend on your
+  character.
+- **Fixed: tabs running into each other.** The Options window's Base and Raid and
+  Battleground tabs (and any tab whose art fills only the bottom of its button) got a flat
+  panel the size of the whole button, which ran over the tab beside it. The panel now sits
+  where the tab's art was.
+- **Spellbook & Talents window.** Joins the flat windows, from a record: page art gone, the
+  tabs flat squares with their pictures, each spell's plate gone (its button, whose frame
+  says whether it is a spell or a passive, stays), flat page arrows. The Talents page is
+  unseen so far (it opens at level 10); its own art is handled like the Legacy window's tree.
+- **Windows that refill themselves stay flat.** The spellbook's pages, the friends list and
+  the other big windows fill themselves again while they are open (a page sorted or turned,
+  a list refreshed), which left some rows in the game's art. They are dressed again every
+  couple of seconds while on screen.
+- **Loot window, second pass.** From a record of the window with loot in it: each row loses
+  its card picture, stroke and rarity tag for a faint flat panel; the item's name, its
+  rarity and its slot (with the quality-coloured border) stay.
+
 ## 0.5.7 - 2026-10-09
 
 Checked against client build 70334 (the October 9 update) with `/mint uidump all`.

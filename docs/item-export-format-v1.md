@@ -45,6 +45,7 @@ The same shape the item API takes, so one importer serves both.
 | `equipLoc` | string | The equip location token (`INVTYPE_FEET`); absent for things that are not worn. |
 | `icon` | number or string | **Exactly what the client returned**: a FileDataID number on modern clients, a texture path string on older ones. |
 | `stats` | object | The item's stat block exactly as the client's `GetItemStats` reports it, keyed by the client's stat token. Zero-valued stats are left out; the key is omitted when there is nothing to report. |
+| `drops` | array | (Added 2026-10-10, optional.) Where the addon saw the item drop: `{ "from": "<creature>", "zone": "<instance or zone>", "instance": "party" / "raid" / …, "times": <corpses> }`, one entry per creature and place, in sorted order, at most 12. `from` is the dead creature targeted when the loot window opened (how a corpse is looted in this client); `zone` is the instance's name when the character is in one (then `instance` is its type as `GetInstanceInfo` gives it) else the zone's; `times` counts corpses, not items. Omitted when the item was never seen to drop from a creature (chests, nodes, mail, trade). The loot tracker does not show this; it is for the website's dungeon and raid loot. |
 
 An item appears once per string. **Items with a random suffix ("of the Bear") are never exported**: every variant shares the item id and differs in name and stats, so there is no single item to file them under.
 

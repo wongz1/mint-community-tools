@@ -7,12 +7,13 @@
     /mint loot               open the window on the Loot tab
     /mint watch              show or hide the loot watcher
     /mint items [all]        export the items seen for the website: what is new, or all of them
+    /mint dungeons           export the group finder's instances with their level bands, for the website
     /mint minimap [show | hide | reset]   the minimap button
     /mint minimap round | square | auto   the shape of the minimap the button sits around
     /mint ui [on | off | reset]   the minimalist UI overhaul (Settings tab); reset puts every frame back
     /mint edit               edit mode: drag the overhaul's frames where you want them
     /mint uidump [all | menus | bags | cast | chat | meter | loot | vendor] [name]
-    /mint uidump frame <Name> | mouse   record what this client's own interface is made of
+    /mint uidump frame <Name> | mouse | finder   record what this client's own interface is made of
                              (for bug reports); "menus" records the game menu and the windows
                              it opens instead, "bags" the bag windows (have them open), "cast"
                              the cast bars, "chat" the chat windows, "meter" the game's damage
@@ -22,7 +23,8 @@
                              group keeps that record apart ("menus gameplay": the Options
                              window's Gameplay page, which only exists while it is open);
                              "frame <Name>" records one frame by name, "mouse" whatever the
-                             mouse is over (point, press Enter, type it, press Enter)
+                             mouse is over (point, press Enter, type it, press Enter);
+                             "finder" what the group finder answers for every instance
     /mint region XX          set your region (US, EU, KR, TW, CN) if the client cannot tell the addon
     /mint json               the gear export as raw JSON in the window (for debugging)
     /mint debug              print client build info and which APIs exist (paste this in bug reports)
@@ -48,7 +50,7 @@
 
 local ADDON, ns = ...
 ns.NAME = "MintCommunityTools"
-ns.VERSION = "0.5.7"
+ns.VERSION = "0.5.8"
 
 -- True when Saved.lua has already put the last save in place. The client's own loading,
 -- when it works, happens later, at ADDON_LOADED.
@@ -312,6 +314,9 @@ SlashCmdList["MINTCOMMUNITYTOOLS"] = function(msg)
         ns.LootUI.ToggleWatch()
     elseif cmd == "items" then
         ns.LootUI.ExportItems(arg == "all")
+    elseif cmd == "dungeons" then
+        ns.UI.Show("gear")
+        ns.UI.ExportDungeons()
     elseif cmd == "minimap" then
         doMinimap(arg)
     elseif cmd == "ui" then

@@ -139,7 +139,64 @@ end
 
 -- Files the item under its ID. A later sighting fills in what an earlier one could not see
 -- (the client describes an item it has not loaded yet by its link alone).
-local function remember(item, t)
+-- Where a drop came from, for the website's item database (export only: the loot tracker
+-- does not show it). The creature is the dead target when the loot window opens, which is
+-- how a corpse is looted in this client (there is no GetLootSourceInfo to ask); the place is
+-- the instance the character is in, else the zone. Nothing is written down when there is no
+-- dead creature targeted (a chest, a node, a corpse looted after retargeting).
+Loot.DROPS_MOST = 12   -- places an item is remembered dropping, per item
+
+local function plain(v)
+    if issecretvalue and issecretvalue(v) then return nil end
+    return v
+end
+
+function Loot.Source()
+    if not (UnitExists and UnitName and UnitIsDead) then return nil end
+    local ok, exists = pcall(UnitExists, "target")
+    if not ok or plain(exists) ~= true then return nil end
+    local okDead, dead = pcall(UnitIsDead, "target")
+    if not okDead or plain(dead) ~= true then return nil end
+    if UnitIsPlayer then
+        local okP, player = pcall(UnitIsPlayer, "target")
+        if okP and plain(player) == true then return nil end
+    end
+    local okName, name = pcall(UnitName, "target")
+    name = okName and plain(name) or nil
+    if type(name) ~= "string" or name == "" then return nil end
+    local from = { from = name }
+    if GetInstanceInfo then
+        local okI, instance, kind = pcall(GetInstanceInfo)
+        instance, kind = okI and plain(instance) or nil, okI and plain(kind) or nil
+        if type(kind) == "string" and kind ~= "none" and type(instance) == "string" and instance ~= "" then
+            from.zone, from.instance = instance, kind
+        end
+    end
+    if not from.zone then
+        local z = zone()
+        if z then from.zone = z end
+    end
+    return from
+end
+
+-- Writes a drop's source onto its item: one line per creature and place, counting corpses.
+local function rememberDrop(cur, from)
+    if type(from) ~= "table" or type(cur) ~= "table" then return end
+    local drops = type(cur.drops) == "table" and cur.drops or {}
+    cur.drops = drops
+    local key = from.from .. "|" .. (from.zone or "") .. "|" .. (from.instance or "")
+    local line = drops[key]
+    if line then
+        line.times = (tonumber(line.times) or 0) + 1
+        return
+    end
+    local n = 0
+    for _ in pairs(drops) do n = n + 1 end
+    if n >= Loot.DROPS_MOST then return end
+    drops[key] = { from = from.from, zone = from.zone, instance = from.instance, times = 1 }
+end
+
+local function remember(item, t, from)
     -- "of the Bear" items share an ID and differ in name and stats: nothing to file them under.
     if item.suffix then return end
     local items = ns.DB().items
@@ -148,6 +205,7 @@ local function remember(item, t)
     if type(cur) ~= "table" then
         o.seen, o.first, o.last = 1, t, t
         items[item.id] = o
+        rememberDrop(o, from)
         return
     end
     for _, k in ipairs(Loot.OBSERVATION_KEYS) do
@@ -156,6 +214,7 @@ local function remember(item, t)
     cur.seen = (tonumber(cur.seen) or 0) + 1
     cur.first = cur.first or t
     cur.last = t
+    rememberDrop(cur, from)
 end
 
 ---------------------------------------------------------------------------
@@ -351,10 +410,11 @@ function Loot.OnLootWindow()
     end
 
     local changed = false
+    local from = Loot.Source()
     for _, key in ipairs(order) do
         local n, s = counts[key], samples[key]
         -- A sighting is a new drop; the same corpse opened again is not one.
-        if n > (shown[key] or 0) then remember(s.item, t) end
+        if n > (shown[key] or 0) then remember(s.item, t, from) end
         for _ = (shown[key] or 0) + 1, n do
             -- With fast looting the chat line can arrive before the window event.
             local early = findRecent(s.item, t, 5, function(e) return e.to and not e.window end)
@@ -418,6 +478,21 @@ end
 local function exportForm(o)
     local item = {}
     for _, k in ipairs(Loot.OBSERVATION_KEYS) do item[k] = o[k] end
+    -- where it dropped, in a fixed order (so that a new place changes the fingerprint)
+    if type(o.drops) == "table" then
+        local keys = {}
+        for key, line in pairs(o.drops) do
+            if type(line) == "table" and type(line.from) == "string" then keys[#keys + 1] = key end
+        end
+        table.sort(keys)
+        if #keys > 0 then
+            item.drops = {}
+            for _, key in ipairs(keys) do
+                local line = o.drops[key]
+                item.drops[#item.drops + 1] = { from = line.from, zone = line.zone, instance = line.instance, times = tonumber(line.times) or 1 }
+            end
+        end
+    end
     return item, ns.Encode.Adler32(ns.Encode.JSON(item))
 end
 

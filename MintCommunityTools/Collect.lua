@@ -357,6 +357,72 @@ end
 
 -- Numbers the window shows about a scan: how many items, the average item level (cosmetic
 -- slots left out), and how many are enchanted.
+---------------------------------------------------------------------------
+-- The dungeons export (docs/class-data-format-v1.md, kind "dungeons")
+---------------------------------------------------------------------------
+
+-- The group finder's list of instances with their level bands. The website lists every
+-- dungeon and raid from the client's own files, but the table with the level bands is not
+-- in them; the finder has them. GetLFGDungeonInfo(id) answers for a sparse set of ids, so
+-- every id up to DUNGEON_IDS_MOST is asked (the WoW Forever instances sit near 3270 today).
+Collect.DUNGEON_IDS_MOST = 5000
+-- The finder's typeID: 1 dungeon and 2 raid on the retail client. The WoW Forever client
+-- (seen with /mint uidump finder on build 70338) answers 0 for every dungeon AND raid, 4 for
+-- a zone and 5 for a battleground, gives no player count, and one level per instance (its
+-- minimum, maximum and recommended levels are the same number, the level to enter at).
+-- A 0 goes out as "dungeon": the website tells raids from dungeons by its own places.
+local DUNGEON_TYPES = { [0] = "dungeon", [1] = "dungeon", [2] = "raid" }
+
+local function plainNumber(v)
+    if type(v) ~= "number" then return nil end
+    if issecretvalue and issecretvalue(v) then return nil end
+    return v
+end
+
+-- Every instance the finder knows: { id, name, type, minLevel, maxLevel, recLevel?, players? }.
+-- Empty when this client has no finder list.
+function Collect.Dungeons()
+    local out = {}
+    if type(GetLFGDungeonInfo) ~= "function" then return out end
+    for id = 1, Collect.DUNGEON_IDS_MOST do
+        -- name, typeID, subtypeID, minLevel, maxLevel, recLevel, minRecLevel, maxRecLevel,
+        -- expansionLevel, groupID, textureFilename, difficulty, maxPlayers, ...
+        local ok, name, typeID, _, minLevel, maxLevel, recLevel, _, _, _, _, _, _, maxPlayers = pcall(GetLFGDungeonInfo, id)
+        if ok and type(name) == "string" and name ~= "" then
+            local low, high = plainNumber(minLevel), plainNumber(maxLevel)
+            if low and high and low >= 1 and high <= 100 and low <= high then
+                local entry = { id = id, name = name, type = DUNGEON_TYPES[plainNumber(typeID) or 0] or "other", minLevel = low, maxLevel = high }
+                local rec, players = plainNumber(recLevel), plainNumber(maxPlayers)
+                if rec and rec > 0 then entry.recLevel = rec end
+                if players and players > 0 then entry.players = players end
+                out[#out + 1] = entry
+            end
+        end
+    end
+    return out
+end
+
+-- The export string, and how many instances it holds; or nil and the reason there is none.
+function Collect.DungeonsExport()
+    local list = Collect.Dungeons()
+    if #list == 0 then
+        if type(GetLFGDungeonInfo) ~= "function" then return nil, "this client has no group finder list to read the level bands from." end
+        return nil, "the group finder lists no instances on this client: nothing to export."
+    end
+    local gameVersion, gameBuild
+    if GetBuildInfo then gameVersion, gameBuild = GetBuildInfo() end
+    local c = collectCharacter("player")
+    local data = {
+        v = 1, kind = "dungeons", ts = time(),
+        locale = GetLocale and GetLocale() or nil,
+        addon = { name = ns.NAME, version = ns.VERSION },
+        game = { version = gameVersion, build = gameBuild },
+        character = { classFile = c.classFile, class = c.class, raceFile = c.raceFile, race = c.race, faction = c.faction, level = c.level },
+        dungeons = list,
+    }
+    return ns.Encode.Pack(data), #list
+end
+
 function Collect.Summarize(data)
     local count, enchanted, levelSum, levelCount = 0, 0, 0, 0
     for _, item in ipairs(data.items) do
