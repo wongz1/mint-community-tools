@@ -105,7 +105,7 @@ local REFILLS = {
 -- one of these is shown it is dressed again every so often. Dressing is cheap and does
 -- nothing twice.
 local REDRESS_SHOWN = { "PlayerSpellsFrame", "CharacterFrame", "CommunitiesFrame", "SocialUIFrame", "ProfessionsFrame",
-                        "LegacySystemFrame", "WorldMapFrame" }
+                        "LegacySystemFrame", "WorldMapFrame", "EditModeSystemSettingsDialog" }
 Menus.REDRESS_EVERY = 2
 -- The parts of a window its art is kept in. A part may be a frame or a single texture.
 local PARTS = { "NineSlice", "Border", "BorderBox", "Bg", "BG", "Background", "Inset", "Header", "TopTileStreaks", "PortraitContainer", "TitleBg" }
@@ -680,10 +680,10 @@ local function flatItemButton(b)
     local first = not dressed[b]
     local d = flat(b, SLOT)
     if not d then return false end
-    if first and hooksecurefunc then
-        for _, method in ipairs({ "SetAtlas", "SetTexture" }) do
-            if type(icon[method]) == "function" then pcall(hooksecurefunc, icon, method, picture) end
-        end
+    if first then
+        -- the game sets the picture again as the slot's item changes: trimmed again after,
+        -- by a hook where that is safe, else at the next dressing of the window
+        for _, method in ipairs({ "SetAtlas", "SetTexture" }) do ns.Overhaul.Hook(icon, method, picture) end
     end
     -- off again: the picture untrimmed and showing, whatever it is of
     remember(icon, "trim", function()
@@ -710,16 +710,17 @@ local function flatItemButton(b)
         end
         plain()
     end
-    if first and hooksecurefunc then
-        if type(border.SetVertexColor) == "function" then
-            pcall(hooksecurefunc, border, "SetVertexColor", function(_, r, g, bl)
-                if off[owner] then return end
-                if type(r) == "number" and type(g) == "number" and type(bl) == "number" then setEdges(d, r, g, bl, 1) end
-            end)
-        end
-        if type(border.Hide) == "function" then pcall(hooksecurefunc, border, "Hide", plain) end
-        if type(border.Show) == "function" then pcall(hooksecurefunc, border, "Show", follow) end
-        if type(border.SetShown) == "function" then pcall(hooksecurefunc, border, "SetShown", follow) end
+    if first then
+        -- the game colours and shows its border as the slot's item changes: followed by a
+        -- hook where that is safe, else at the next dressing of the window
+        local O = ns.Overhaul
+        O.Hook(border, "SetVertexColor", function(_, r, g, bl)
+            if off[owner] then return end
+            if type(r) == "number" and type(g) == "number" and type(bl) == "number" then setEdges(d, r, g, bl, 1) end
+        end)
+        O.Hook(border, "Hide", plain)
+        O.Hook(border, "Show", follow)
+        O.Hook(border, "SetShown", follow)
     end
     hide(border)
     follow()
@@ -757,7 +758,7 @@ local function paintBar(tex)
     paint(tex)
     if painted[tex] then return end
     painted[tex] = true
-    if hooksecurefunc and type(tex.SetAtlas) == "function" then pcall(hooksecurefunc, tex, "SetAtlas", paint) end
+    ns.Overhaul.Hook(tex, "SetAtlas", paint)   -- else painted again at the next dressing
 end
 
 -- A side tab (the character window's, the professions window's): a frame with a Background
@@ -884,14 +885,38 @@ local function isIconTab(b)
     return isType(b, "Button") and isType(b.Icon, "Texture") and isType(b.SquareBackground, "Texture")
 end
 
+-- On this client such a tab also carries an ordinary tab's art (Left, Middle, Right and
+-- their lit and highlight twins), hidden by the game but there: it goes too, and the tab is
+-- told apart from a push button BEFORE a push button is looked for, or its icon would go
+-- with the rest of its art.
+local ICON_TAB_ART = { "Left", "Middle", "Right", "LeftActive", "MiddleActive", "RightActive",
+                       "LeftHighlight", "MiddleHighlight", "RightHighlight" }
 local function flatIconTab(b)
     hide(b.SquareBackground)
     if isType(b.SquareBackgroundActiveGlow, "Texture") then hide(b.SquareBackgroundActiveGlow) end
     if isType(b.SquareBackgroundActive, "Texture") then paintBar(b.SquareBackgroundActive) end
+    for _, key in ipairs(ICON_TAB_ART) do
+        if isType(b[key], "Texture") then hide(b[key]) end
+    end
     local d = flat(b, ns.W.COLOR.panel, 2)
     if d then hoverHooks(b) end
     return d ~= nil
 end
+
+-- Text the game drew dark, for a parchment page (the spellbook's names and headings), made
+-- light for the panel it sits on now. Text that is already light or grey (a spell not yet
+-- learned) is left, so the game's own meaning in the colour stays.
+local function lightenText(fs)
+    if type(fs) ~= "table" or type(fs.GetTextColor) ~= "function" or type(fs.SetTextColor) ~= "function" then return false end
+    local ok, r, g, b, a = pcall(fs.GetTextColor, fs)
+    if not ok or type(r) ~= "number" or type(g) ~= "number" or type(b) ~= "number" then return false end
+    if r + g + b > 1.2 then return false end
+    remember(fs, "textColor", function() pcall(fs.SetTextColor, fs, r, g, b, a or 1) end)
+    local c = ns.W.COLOR.text
+    pcall(fs.SetTextColor, fs, c[1], c[2], c[3], c[4])
+    return true
+end
+Menus.LightenText = lightenText
 
 -- An entry on a page of the spellbook, and a heading there: a frame with a Backplate behind
 -- it (and a Border that is a divider). The plate and the divider go; the spell's button,
@@ -900,10 +925,15 @@ local function isPlated(f)
     return isType(f.Backplate, "Texture")
 end
 
+local PLATED_TEXT = { "Text", "Name", "SubName" }
 local function flatPlated(f)
     hide(f.Backplate)
     local atlas = isType(f.Border, "Texture") and atlasOf(f.Border)
     if atlas and atlas:lower():find("divider", 1, true) then hide(f.Border) end
+    -- the words on it, drawn dark for the page that was there
+    for _, holder in ipairs({ f, type(f.TextContainer) == "table" and f.TextContainer or nil }) do
+        for _, key in ipairs(PLATED_TEXT) do lightenText(holder[key]) end
+    end
     return true
 end
 
@@ -941,18 +971,32 @@ Menus.FlatIconButton = flatIconButton
 
 local dressInside
 
+-- Has `fn(box)` run after each update of a scrolling list. Through the list's own callback
+-- registry where it has one (the game's way: nothing on the list is replaced), else by
+-- hooking its Update. Hooking replaced the method on the list itself, and the game's secure
+-- code has been seen to find no Update on such a list at all, an error in the game's own
+-- settings window. Returns how it was done, or false.
+function Menus.AfterScrollUpdate(box, fn)
+    if type(box) ~= "table" then return false end
+    local events = box.Event
+    if type(box.RegisterCallback) == "function" and type(events) == "table" and events.OnUpdate ~= nil then
+        local ok = pcall(box.RegisterCallback, box, events.OnUpdate, function() fn(box) end, {})
+        if ok then return "callback" end
+    end
+    if ns.Overhaul.Hook(box, "Update", function(self) fn(self) end) then return "hook" end
+    return false
+end
+
 -- A scrolling list makes and reuses its rows as it scrolls: its rows are looked over each
 -- time it lays itself out.
 local function watchScrollBox(box)
     if hooked[box] then return end
     hooked[box] = true
     local owner = OWNER
-    if hooksecurefunc and type(box.Update) == "function" then
-        pcall(hooksecurefunc, box, "Update", function(self)
-            if off[owner] then return end
-            if type(self.ScrollTarget) == "table" then pcall(Menus.As, owner, dressInside, self.ScrollTarget, 1, { left = MAX_FRAMES, skip = {} }) end
-        end)
-    end
+    Menus.AfterScrollUpdate(box, function(self)
+        if off[owner] then return end
+        if type(self.ScrollTarget) == "table" then pcall(Menus.As, owner, dressInside, self.ScrollTarget, 1, { left = MAX_FRAMES, skip = {} }) end
+    end)
 end
 
 -- Dresses what is under a frame, a few levels down. Returns how many controls were dressed.
@@ -972,6 +1016,8 @@ dressInside = function(f, depth, budget)
                 deeper = true
             elseif isItemButton(child) then
                 if flatItemButton(child) then n = n + 1 end
+            elseif isIconTab(child) then
+                if flatIconTab(child) then n = n + 1 end
             elseif isPushButton(child) then
                 if flatButton(child) then n = n + 1 end
             elseif isDropdown(child) then
@@ -999,8 +1045,6 @@ dressInside = function(f, depth, budget)
             elseif isLootCard(child) then
                 if flatLootCard(child) then n = n + 1 end
                 deeper = true
-            elseif isIconTab(child) then
-                if flatIconTab(child) then n = n + 1 end
             elseif isPlated(child) then
                 if flatPlated(child) then n = n + 1 end
                 deeper = true
@@ -1224,14 +1268,15 @@ local function dressNamed(name, methods, owner)
         if type(f.HookScript) == "function" then
             pcall(f.HookScript, f, "OnShow", function(self) pcall(Menus.Dress, self, name, owner) end)
         end
-        -- The game menu fills itself with buttons through this, on a newer client.
-        if name == "GameMenuFrame" and hooksecurefunc and type(f.InitButtons) == "function" then
-            pcall(hooksecurefunc, f, "InitButtons", function(self) pcall(Menus.Dress, self, name, owner) end)
+        -- The game menu fills itself with buttons through this, on a newer client (else the
+        -- OnShow hook above comes after the buttons are made).
+        if name == "GameMenuFrame" then
+            ns.Overhaul.Hook(f, "InitButtons", function(self) pcall(Menus.Dress, self, name, owner) end)
         end
+        -- A window that fills itself again through these while it is open: dressed after
+        -- each, where hooking is safe; else it is dressed again every so often while shown.
         for _, method in ipairs(methods or {}) do
-            if hooksecurefunc and type(f[method]) == "function" then
-                pcall(hooksecurefunc, f, method, function(self) pcall(Menus.Dress, self, name, owner) end)
-            end
+            ns.Overhaul.Hook(f, method, function(self) pcall(Menus.Dress, self, name, owner) end)
         end
     end
     return true

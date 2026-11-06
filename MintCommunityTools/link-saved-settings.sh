@@ -5,7 +5,7 @@
 #
 # Run it once, with the game closed, after the addon has saved at least once (log in with it
 # enabled, then /exit). It finds the game folder from its own location, so it must be run from
-# the installed copy: <World of Warcraft>/_classic_beta_/Interface/AddOns/MintCommunityTools/
+# the installed copy: <World of Warcraft>/_forever_/Interface/AddOns/MintCommunityTools/ (or _classic_beta_)
 #
 #   sh link-saved-settings.sh
 

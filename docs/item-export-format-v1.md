@@ -2,7 +2,7 @@
 
 The contract between the in-game addon (producer) and the website (consumer) for item data: what the game client says about the items a player has seen drop. The website's item database is curated by officers; this export is how members feed it without an API token. The companion specs are [`export-string-format-v1.md`](export-string-format-v1.md) (a character), [`raid-capture-format-v1.md`](raid-capture-format-v1.md) (a raid) and [`talent-tree-format-v1.md`](talent-tree-format-v1.md) (a class's talents).
 
-Produced by the addon's loot tracker (Loot tab, **Export new items**); consumed by the website's item importer, which files every item in the officers' review queue — the same buffer the item API (`POST /api/items/submit`) writes to. Nothing in an export reaches the item database until an officer approves it. A change to this format is made in both repositories.
+Produced by the addon's loot tracker (Loot tab, **Export new items**; since 0.5.9 the tab's **Scan cache** files every item the client has cached, which the next export then carries too, so an export may hold items the player never saw drop); consumed by the website's item importer, which files every item in the officers' review queue — the same buffer the item API (`POST /api/items/submit`) writes to. Nothing in an export reaches the item database until an officer approves it. A change to this format is made in both repositories.
 
 ## Envelope
 

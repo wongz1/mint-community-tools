@@ -17,7 +17,7 @@
       - the minimize button and the breakdown window's close button become flat squares.
 
     The meter also sits on a mover ("Damage meter" in edit mode; a right-click on its box
-    opens the game's own box of settings for the meter, the one its Edit Mode shows, and
+    opens the game's own Edit Mode, where a click on the meter opens its box of settings, and
     Shift-right-click puts the box back): the frame the game keeps
     its first window on is fastened to the mover's box, where the game had it until the box
     is dragged. The game places that frame itself when its layout arrives; it is put back on
@@ -25,7 +25,12 @@
 
     What is left to the game, because only its own settings can change it safely: the bars'
     height and spacing, the window's size, the icons and the number format. They are in the
-    game's Edit Mode (click the meter there).
+    game's Edit Mode (click the meter there). The box is a secure button that runs the
+    game's own /editmode on the right-click: the game then does everything itself. The addon
+    once opened the game's settings box for the meter directly and saved the layout on its
+    close; everything the game did from there carried the addon's taint, so the meter could
+    no longer compare the secret numbers the server sends it (a Lua error at every refresh
+    of a bar set up then), and the meter was left in its editing look.
 
     How: the meter's windows are found by name (DamageMeterSessionWindow1, 2, ...). Their bars
     are made as they scroll into view and the game dresses each again whenever it fills it,
@@ -53,6 +58,7 @@ local gameColor = weak()   -- status bar -> { r, g, b, a }: the colour the game 
 local gameFill = weak()    -- status bar -> the atlas its fill had, or false
 local gameFont = weak()    -- font string -> { file, size, flags }: what it had before
 local flattened = weak()   -- status bar -> true once its fill is the plain one
+local painted = weak()     -- status bar -> { r, g, b }: the colour the addon last painted it
 Meter.windows = {}         -- the session windows found so far
 
 local busy = false         -- true while the addon itself is the one setting something
@@ -110,22 +116,28 @@ local function quiet(tex)
             if ok and type(a) == "number" then alpha = a end
         end
         gameAlpha[tex] = alpha
-        if hooksecurefunc then
-            pcall(hooksecurefunc, tex, "SetAlpha", function(self, a)
-                if busy then return end
-                if type(a) == "number" then gameAlpha[self] = a end
-                if on() then
-                    busy = true
-                    pcall(self.SetAlpha, self, 0)
-                    busy = false
-                end
-            end)
-        end
+        -- (else the look once a second makes it invisible again)
+        ns.Overhaul.Hook(tex, "SetAlpha", function(self, a)
+            if busy then return end
+            if type(a) == "number" then gameAlpha[self] = a end
+            if on() then
+                busy = true
+                pcall(self.SetAlpha, self, 0)
+                busy = false
+            end
+        end)
         ns.Menus.Remember(tex, "alpha", function()
             busy = true
             pcall(tex.SetAlpha, tex, gameAlpha[tex] or 1)
             busy = false
         end)
+    else
+        -- visible again since the last look: the game set its alpha (its "background
+        -- transparency"); written down as the game's, before it is made invisible again
+        if type(tex.GetAlpha) == "function" then
+            local ok, a = pcall(tex.GetAlpha, tex)
+            if ok and type(a) == "number" and a > 0 then gameAlpha[tex] = a end
+        end
     end
     busy = true
     pcall(tex.SetAlpha, tex, 0)
@@ -207,6 +219,20 @@ local function paint(sb)
     busy = true
     pcall(sb.SetStatusBarColor, sb, r, g, b, a or 1)
     busy = false
+    painted[sb] = { r, g, b }
+end
+
+-- The colour a bar has right now, when it is not the one the addon painted: the game gave
+-- it, and it is written down as the game's (what the bar shows with "one colour" off, and
+-- what it gets back when the skin is switched off). With no hook on the bar's methods, this
+-- is how the game's colour is seen.
+local function noteGameColor(sb)
+    if type(sb.GetStatusBarColor) ~= "function" then return end
+    local ok, r, g, b, a = pcall(sb.GetStatusBarColor, sb)
+    if not (ok and type(r) == "number" and type(g) == "number" and type(b) == "number") then return end
+    local p = painted[sb]
+    if p and math.abs(p[1] - r) < 0.005 and math.abs(p[2] - g) < 0.005 and math.abs(p[3] - b) < 0.005 then return end
+    gameColor[sb] = { r, g, b, type(a) == "number" and a or 1 }
 end
 
 local function flatten(sb)
@@ -230,20 +256,19 @@ local function fill(sb)
                 gameColor[sb] = { r, g, b, type(a) == "number" and a or 1 }
             end
         end
-        if hooksecurefunc then
-            pcall(hooksecurefunc, sb, "SetStatusBarTexture", function(self)
-                if busy or not on() then return end
-                flatten(self)
-                paint(self)
-            end)
-            pcall(hooksecurefunc, sb, "SetStatusBarColor", function(self, r, g, b, a)
-                if busy then return end
-                if type(r) == "number" and type(g) == "number" and type(b) == "number" then
-                    gameColor[self] = { r, g, b, type(a) == "number" and a or 1 }
-                end
-                if on() then paint(self) end
-            end)
-        end
+        -- (else the look once a second flattens and paints the bar again)
+        ns.Overhaul.Hook(sb, "SetStatusBarTexture", function(self)
+            if busy or not on() then return end
+            flatten(self)
+            paint(self)
+        end)
+        ns.Overhaul.Hook(sb, "SetStatusBarColor", function(self, r, g, b, a)
+            if busy then return end
+            if type(r) == "number" and type(g) == "number" and type(b) == "number" then
+                gameColor[self] = { r, g, b, type(a) == "number" and a or 1 }
+            end
+            if on() then paint(self) end
+        end)
         ns.Menus.Remember(sb, "fill", function()
             flattened[sb] = nil
             local tex = fillOf(sb)
@@ -256,8 +281,9 @@ local function fill(sb)
             end
         end)
     end
-    -- the game put its own picture back on the fill without being seen to
+    -- the game put its own picture, or colour, back on the bar without being seen to
     if atlas or not flattened[sb] then flatten(sb) end
+    noteGameColor(sb)
     paint(sb)
 end
 
@@ -380,7 +406,7 @@ local function dressWindow(win)
         hooked[win] = true
         local function pass() Meter.Pass(win) end
         for _, box in ipairs({ part(body, "ScrollBox") or false, source and part(source, "ScrollBox") or false }) do
-            if box and hooksecurefunc and type(box.Update) == "function" then pcall(hooksecurefunc, box, "Update", pass) end
+            if box then ns.Menus.AfterScrollUpdate(box, pass) end
         end
         if type(win.HookScript) == "function" then pcall(win.HookScript, win, "OnShow", pass) end
     end
@@ -404,70 +430,39 @@ function Meter.OpenSettings()
     return ns.SettingsUI.ShowPage("meter")
 end
 
--- The game's own box of settings for the meter: the one its Edit Mode shows when the meter
--- is clicked there (style, numbers, frame width and height, bar height, padding,
--- transparency, text size, visibility). Opened here without the game's Edit Mode.
---
--- This is the one place the addon asks the game's edit mode to do something rather than only
--- changing how the meter looks, and the game knows an addon asked. Two things are done about
--- that. It is not opened in combat. And when the box closes, what was changed is saved into
--- the game's own layout at once: the game then applies that layout to the meter itself, as
--- its own, in place of the values the addon's request left on it.
--- Returns true when the box was asked to open.
-function Meter.OpenGameSettings()
-    local dialog, f = _G.EditModeSystemSettingsDialog, system()
-    if not f or type(dialog) ~= "table" or type(dialog.AttachToSystemFrame) ~= "function" then return false end
-    if ns.Overhaul.GameEditing() then return false end   -- the game's edit mode is open: it opens this itself
-    if InCombatLockdown and InCombatLockdown() then
-        ns.Say("the damage meter's settings open when you are out of combat.")
-        return false
-    end
-    if not pcall(dialog.AttachToSystemFrame, dialog, f) then return false end
-    Meter.dialogOpen = true
-    if not hooked[dialog] then
-        hooked[dialog] = true
-        if type(dialog.HookScript) == "function" then
-            pcall(dialog.HookScript, dialog, "OnHide", function()
-                if Meter.dialogOpen then Meter.SaveGameSettings() end
-            end)
-        end
-    end
-    return true
+-- The game's Edit Mode has the meter's own settings (style, numbers, frame width and height,
+-- bar height, padding, transparency, text size, visibility), in the box it shows when the
+-- meter is clicked there. Does this client have the command that opens it?
+function Meter.GameEditCommand()
+    if type(_G.EditModeManagerFrame) ~= "table" then return nil end
+    if type(_G.SLASH_EDITMODE1) == "string" then return _G.SLASH_EDITMODE1 end
+    return nil
 end
 
--- The box has closed: what was changed in it is saved into the game's layout. Returns
--- "saved", "clean" (nothing was changed), "preset" (the game's own two layouts cannot be
--- changed), "editing" (the game's edit mode is open and saves for itself) or false.
-function Meter.SaveGameSettings()
-    Meter.dialogOpen = false
-    if ns.Overhaul.GameEditing() then return "editing" end
-    local manager = _G.EditModeManagerFrame
-    if type(manager) ~= "table" then return false end
-    if type(manager.HasActiveChanges) == "function" then
-        local ok, changed = pcall(manager.HasActiveChanges, manager)
-        if ok and changed == false then return "clean" end
+-- The meter's box runs that command on a right-click, as a secure button: the game opens
+-- its Edit Mode itself, and nothing it does from there is the addon's doing. Set once; the
+-- game does not let a secure button's attributes change in combat.
+local function armBox(box)
+    if rawget(box, "armed") == true or rawget(box, "secure") ~= true or type(box.SetAttribute) ~= "function" then return end
+    local command = Meter.GameEditCommand()
+    if not command then return end
+    if InCombatLockdown and InCombatLockdown() then return end
+    local ok = pcall(box.SetAttribute, box, "type2", "macro")
+    if ok then
+        pcall(box.SetAttribute, box, "macrotext2", command)
+        pcall(box.SetAttribute, box, "shift-type2", "none")   -- Shift-right-click stays the addon's: it puts the box back
+        box.armed = true
     end
-    if type(manager.GetActiveLayoutInfo) == "function" and type(Enum) == "table" and type(Enum.EditModeLayoutType) == "table" then
-        local ok, info = pcall(manager.GetActiveLayoutInfo, manager)
-        local preset = Enum.EditModeLayoutType.Preset
-        if ok and type(info) == "table" and preset ~= nil and info.layoutType == preset then
-            ns.Say("the damage meter's settings were not saved: the game's own Modern and Classic layouts cannot be changed. "
-                .. "Make a layout of your own in the game's Edit Mode (Shift-click Edit Mode in the Escape menu), then set the meter up again.")
-            return "preset"
-        end
-    end
-    if type(manager.SaveLayouts) == "function" and pcall(manager.SaveLayouts, manager) then
-        ns.Say("the damage meter's settings are saved in the game's layout.")
-        return "saved"
-    end
-    ns.Say("the damage meter's settings could not be saved from here: open the game's Edit Mode (Shift-click Edit Mode in the Escape menu) and save there.")
-    return false
 end
 
--- What a right-click on the meter's box in edit mode opens: the game's box of settings for
--- the meter, or the addon's Meter page when that box is not there to open.
+-- What a right-click on the meter's box in edit mode does. With the game's Edit Mode on this
+-- client, the secure click has opened it already: a word about where the settings are.
+-- Without, the addon's Meter page.
 function Meter.OnBoxMenu()
-    if Meter.OpenGameSettings() then return "game" end
+    if Meter.GameEditCommand() then
+        ns.Say("the game's Edit Mode is open: click the damage meter there for its own settings, and Save when done.")
+        return "game"
+    end
     return Meter.OpenSettings() and "addon" or false
 end
 
@@ -503,8 +498,11 @@ local function mover(f)
         local left, bottom = measure(f, "GetLeft"), measure(f, "GetBottom")
         Meter.home = (left and bottom) and { "BOTTOMLEFT", math.floor(left + 0.5), math.floor(bottom + 0.5) } or { "CENTER", -250, 19 }
     end
+    ns.Overhaul.SECURE_MOVERS.meter = true
     local box = ns.Overhaul.Mover("meter", "Damage meter", width, height, Meter.home)
-    -- a right-click on the box in edit mode opens the meter's settings
+    -- a right-click on the box in edit mode opens the game's Edit Mode (a secure click), or
+    -- the addon's Meter page where the game has none
+    armBox(box)
     ns.Overhaul.MoverMenu("meter", Meter.OnBoxMenu)
     return box
 end
@@ -531,11 +529,9 @@ function Meter.Place()
     placing = false
     if not hooked[f] then
         hooked[f] = true
-        if hooksecurefunc and type(f.SetPoint) == "function" then
-            pcall(hooksecurefunc, f, "SetPoint", function()
-                if not placing and on() then Meter.Place() end
-            end)
-        end
+        ns.Overhaul.Hook(f, "SetPoint", function()
+            if not placing and on() then Meter.Place() end
+        end)   -- else the look once a second
     end
     return true
 end

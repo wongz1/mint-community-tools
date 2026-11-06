@@ -216,6 +216,7 @@ function SettingsUI.Build(panel, frame)
         elseif path:match("^cast%.") then owner = ns.CastBars
         elseif path:match("^bars%.") then owner = ns.Bars
         elseif path:match("^meter%.") then owner = ns.Meters
+        elseif path:match("^map%.") then owner = ns.Map
         else owner = ns.Units end
         local limit = type(owner) == "table" and type(owner.LIMITS) == "table" and owner.LIMITS[path:match("[^%.]+$")]
         if type(limit) ~= "table" then return false end   -- that part of the addon is not loaded
@@ -270,6 +271,24 @@ function SettingsUI.Build(panel, frame)
     check("bars.hideMicro", "Hide the micro menu (Escape and the keybinds still open everything)", 18)
     check("bars.hideBags", "Hide the bag row: the backpack, the bags and the keyring (your bag key still opens them)", 18)
     check("bars.extraBags", "The keyring and the reagent bag slot in the bag row, when it is shown", 18)
+    -- the buttons' size and the gap between them, then each bar this client has: shown,
+    -- how many buttons, how many to a row
+    if ns.Bars then
+        y = y - 2
+        local ROW = W.BUTTON_H + GAP
+        stepper("bars.size", "Button size", 18)
+        stepper("bars.spacing", "Spacing", 18 + 216)
+        y = y - ROW
+        for _, def in ipairs(ns.Bars.BARS) do
+            if ns.Bars.Exists(def.key) then
+                checkAt("bars." .. def.key .. ".shown", def.label, 18, 126)
+                stepper("bars." .. def.key .. ".buttons", "Buttons", 150)
+                stepper("bars." .. def.key .. ".perRow", def.vertical and "Per column" or "Per row", 300)
+                y = y - ROW
+            end
+        end
+        note("The pet and stance bars' buttons are four fifths of the size. Fewer buttons to a row stack the rest beneath (beside, for the two upright bars). A hidden bar's keybinds still work. A change made in combat applies when it ends.")
+    end
     header("Experience bar")
     check("bars.xpClassColor", "In your class colour (turn off for the game's own purple)")
     y = y - 2
@@ -330,6 +349,18 @@ function SettingsUI.Build(panel, frame)
     stepper("units.smallWidth", "Small frames' width", 18)
     stepper("units.smallHeight", "Small frames' height", COL2)
     y = y - ROW
+    -- the party frames: their switch, their aura rows and their size; portraits, fonts and
+    -- icon sizes are the ones above
+    y = y - 2
+    check("units.party.enabled", "Party frames: four frames for your party on one box, the game's party window put away (not in a raid)", 18)
+    check("units.party.onlyMine", "Only my debuffs on party members", 36)
+    y = y - 2
+    cycle("units.party.buffs", "Party buffs", 18)
+    cycle("units.party.debuffs", "Party debuffs", 18 + 150 + GAP)
+    y = y - W.BUTTON_H - GAP
+    stepper("units.partyWidth", "Party frames' width", 18)
+    stepper("units.partyHeight", "Party frames' height", COL2)
+    y = y - ROW
     stepper("units.buffSize", "Buff icon size", 18)
     stepper("units.debuffSize", "Debuff icon size", COL2)
     y = y - ROW
@@ -338,7 +369,7 @@ function SettingsUI.Build(panel, frame)
     checkAt("units.buffTimers", "Countdown numbers on buffs", 18, COL2 - 18 - GAP)
     checkAt("units.debuffTimers", "Countdown numbers on debuffs", COL2, CW - 2 - COL2)
     y = y - 18
-    note("Width and height are the player and target frames'; the small frames are the target's target and the pet. A size changed in combat applies when it ends.")
+    note("Width and height are the player and target frames'; the small frames are the target's target and the pet. Portraits, fonts and icon sizes apply to the party frames too. A size changed in combat applies when it ends.")
 
     start("cast")
     header("Cast bars")
@@ -393,6 +424,10 @@ function SettingsUI.Build(panel, frame)
     check("map.coords", "Your coordinates, at the right of the zone's name (below the map without it)", 18)
     check("map.localTime", "Your computer's time below it", 18)
     check("map.gameTime", "The game world's time below it", 18)
+    y = y - 2
+    stepper("map.size", "Size", 18)
+    y = y - W.BUTTON_H - GAP
+    note("The map is square, so one number is its width and its height. The strips above and below keep their own height; the minimap button keeps its place around the edge.")
 
     start("quests")
     header("Quest tracker")

@@ -27,7 +27,8 @@ local Bars = {}
 ns.Bars = Bars
 
 local ipairs, type, pcall, tostring = ipairs, type, pcall, tostring
-local floor = math.floor
+local floor, ceil, min, max = math.floor, math.ceil, math.min, math.max
+local sformat = string.format
 local sformat = string.format
 
 local BARS = {
@@ -104,12 +105,15 @@ Bars.BlankRegions = blankRegions
 ---------------------------------------------------------------------------
 
 local skinned = setmetatable({}, { __mode = "k" })   -- buttons already dressed (the layout is redone now and then)
+local normals = setmetatable({}, { __mode = "k" })   -- button -> its round art region, kept blank
 
 local function skinButton(b, size)
     local W = ns.W
     local name = b.GetName and b:GetName()
     if type(name) ~= "string" then name = "" end
     pcall(b.SetSize, b, size, size)
+    local macro = frame(name .. "Name") or (type(b.Name) == "table" and b.Name or nil)
+    if macro then pcall(macro.SetWidth, macro, size - 4) end
     if skinned[b] then return end
     skinned[b] = true
     W.skin(b, W.COLOR.panel)
@@ -118,13 +122,14 @@ local function skinButton(b, size)
     -- sets the normal texture again whenever the button gets an action, so it is kept blank
     -- after every such call.
     local normal = b.GetNormalTexture and b:GetNormalTexture()
-    if normal then pcall(normal.SetAlpha, normal, 0) end
-    if hooksecurefunc and b.SetNormalTexture then
-        pcall(hooksecurefunc, b, "SetNormalTexture", function(self)
-            local t = self:GetNormalTexture()
-            if t then t:SetAlpha(0) end
-        end)
+    if normal then
+        pcall(normal.SetAlpha, normal, 0)
+        normals[b] = normal   -- the same region whatever picture the game puts on it
     end
+    ns.Overhaul.Hook(b, "SetNormalTexture", function(self)
+        local t = self:GetNormalTexture()
+        if t then t:SetAlpha(0) end
+    end)   -- else Bars.Check blanks it again at its look once a second
     ns.Overhaul.Blank(frame(name .. "Border"))
     ns.Overhaul.Blank(frame(name .. "FloatingBG"))
     -- Newer clients keep the slot art in fields.
@@ -188,11 +193,9 @@ local function skinButton(b, size)
         pcall(count.ClearAllPoints, count)
         pcall(count.SetPoint, count, "BOTTOMRIGHT", b, "BOTTOMRIGHT", -2, 2)
     end
-    local macro = frame(name .. "Name") or (type(b.Name) == "table" and b.Name or nil)
     if macro then
         pcall(macro.ClearAllPoints, macro)
         pcall(macro.SetPoint, macro, "BOTTOM", b, "BOTTOM", 0, 2)
-        pcall(macro.SetWidth, macro, size - 4)
     end
 end
 
@@ -223,22 +226,185 @@ local function barShown(def)
     return true
 end
 
+-- A bar's own settings: shown, how many buttons, how many to a row. Missing ones (a save
+-- from before they existed) read as the bar's whole, in one row.
+local function barConfig(def)
+    local cfg = settings()[def.key]
+    if type(cfg) ~= "table" then cfg = {} end
+    local buttons = tonumber(cfg.buttons) or def.count
+    local perRow = tonumber(cfg.perRow) or def.count
+    return cfg.shown ~= false, max(1, min(buttons, def.count)), max(1, min(perRow, def.count))
+end
+
+-- Buttons the addon has put away: a bar's beyond the number wanted, or all of a hidden bar.
+-- They are made invisible and deaf to the mouse, NOT hidden: the game shows and hides its
+-- action buttons as it likes (an empty slot, the grid while a spell is dragged, a bar's own
+-- visibility), and a button hidden by the addon would be shown again by the game and hidden
+-- again by the addon's next look, flickering. Alpha the game leaves alone, and keybinds
+-- still reach an invisible button. Bars.Check sets it again should anything change it.
+local away = setmetatable({}, { __mode = "k" })
+Bars.away = away
+
+local function keepAway(b, inCombat)
+    pcall(b.SetAlpha, b, 0)
+    if not inCombat then pcall(b.EnableMouse, b, false) end
+end
+
+local function putAway(b)
+    away[b] = true
+    keepAway(b, InCombatLockdown and InCombatLockdown())
+end
+
+local function bringBack(b)
+    away[b] = nil
+    pcall(b.SetAlpha, b, 1)
+    pcall(b.EnableMouse, b, true)
+end
+
+-- Does this client have the bar at all?
+function Bars.Exists(key)
+    for _, def in ipairs(BARS) do
+        if def.key == key then return #buttonsOf(def) > 0 end
+    end
+    return false
+end
+
+-- This client keeps whether each extra bar is shown in the game's old toggles
+-- (GetActionBarToggles: one true or false per bar, bars 2 to 8 in order), and hides the
+-- whole bar frame, buttons and all, when a toggle is off: nothing done to the buttons can
+-- show them then. So the addon's switch for such a bar sets the game's toggle, and the
+-- game's own settings changing a toggle is adopted into the addon's switch (the once-a-
+-- second look sees it): the two are one setting, seen from either side. Bar 1, the pet
+-- bar and the stance bar have no toggle: their switch puts their buttons away.
+local TOGGLE_INDEX = { bar2 = 1, bar3 = 2, bar4 = 3, bar5 = 4, bar6 = 5, bar7 = 6, bar8 = 7 }
+Bars.TOGGLE_INDEX = TOGGLE_INDEX
+
+local function gameToggles()
+    if type(GetActionBarToggles) ~= "function" then return nil end
+    local r = { pcall(GetActionBarToggles) }
+    if not r[1] then return nil end
+    local t = {}
+    for i = 2, #r do t[i - 1] = r[i] == true end
+    return t
+end
+
+-- What the toggle calls did, kept in the save file (/mint bars prints it too), for reading
+-- a client whose toggles behave otherwise than expected. The last few only.
+Bars.LOG_MOST = 12
+local function log(text)
+    local db = ns.DB()
+    db.barsLog = type(db.barsLog) == "table" and db.barsLog or {}
+    local t = db.barsLog
+    t[#t + 1] = (type(date) == "function" and date("%H:%M:%S") or "") .. " " .. text
+    while #t > Bars.LOG_MOST do table.remove(t, 1) end
+end
+
+local function togglesText(t)
+    if not t then return "none" end
+    local parts = {}
+    for i = 1, #t do parts[i] = t[i] and "1" or "0" end
+    return table.concat(parts)
+end
+
+-- Sets the game's toggle for `key`, has the game's bars read their toggles again (what the
+-- game's own settings panel does after setting one), and checks that the game read it as
+-- meant: a client whose toggles are laid out otherwise is left as it was, and says so.
+local function setGameToggle(key, on)
+    local index = TOGGLE_INDEX[key]
+    local had = gameToggles()
+    if not index or not had or type(SetActionBarToggles) ~= "function" or had[index] == nil then
+        log(("%s: no toggle to set (index %s, toggles %s, SetActionBarToggles %s)"):format(key, tostring(index), togglesText(had), type(SetActionBarToggles)))
+        return false
+    end
+    local bar = BAR_FRAMES[key] and frame(BAR_FRAMES[key][1])
+    local function barState()
+        if not bar then return "no frame" end
+        local okS, shown = pcall(bar.IsShown, bar)
+        local okV, visible = pcall(bar.IsVisible, bar)
+        return (okS and shown and "shown" or "hidden") .. "/" .. (okV and visible and "visible" or "not visible")
+    end
+    if had[index] == on then
+        log(("%s: toggle already %s (toggles %s, frame %s)"):format(key, on and "on" or "off", togglesText(had), barState()))
+        return true
+    end
+    local want = {}
+    for i = 1, #had do want[i] = had[i] end
+    want[index] = on
+    local okSet, err = pcall(SetActionBarToggles, unpack(want, 1, #had))
+    local got = gameToggles() or {}
+    for i = 1, #had do
+        if got[i] ~= want[i] then
+            pcall(SetActionBarToggles, unpack(had, 1, #had))
+            log(("%s: set %s -> got %s, wanted %s: put back"):format(key, togglesText(want), togglesText(got), togglesText(want)))
+            ns.Say(("this client's bar toggles did not take as expected (bar %d); the game's own setting for the bar is left as it was."):format(index + 1))
+            return false
+        end
+    end
+    local before = barState()
+    local okUpdate, errUpdate = true, nil
+    if type(MultiActionBar_Update) == "function" then okUpdate, errUpdate = pcall(MultiActionBar_Update) end
+    local after = barState()
+    -- the bar frame not following its toggle: told directly, as the edit mode would
+    if bar and type(bar.SetShownBase) == "function" and ((on and after:find("^hidden")) or (not on and after:find("^shown"))) then
+        pcall(bar.SetShownBase, bar, on)
+        after = after .. " -> SetShownBase: " .. barState()
+    end
+    log(("%s: set %s (%s), toggles now %s, MultiActionBar_Update %s, frame %s -> %s"):format(
+        key, togglesText(want), okSet and "ok" or ("error " .. tostring(err)), togglesText(got),
+        type(MultiActionBar_Update) == "function" and (okUpdate and "ran" or ("error " .. tostring(errUpdate))) or "missing", before, after))
+    return true
+end
+
+-- The game's toggles, read into the addon's switches: for each bar with one, the game's
+-- word is final. Returns the keys of the bars whose switch changed.
+local function adoptGameToggles()
+    local had = gameToggles()
+    if not had then return {} end
+    local s = settings()
+    local changed = {}
+    for key, index in pairs(TOGGLE_INDEX) do
+        local cfg = s[key]
+        if type(cfg) == "table" and had[index] ~= nil and (cfg.shown ~= false) ~= had[index] then
+            cfg.shown = had[index]
+            changed[#changed + 1] = key
+        end
+    end
+    return changed
+end
+
 local function layoutBar(def)
     local s = settings()
     local buttons = buttonsOf(def)
     if #buttons == 0 then return false end
+    local shown, wanted, perRow = barConfig(def)
+    if not shown then
+        for _, b in ipairs(buttons) do putAway(b) end
+        ns.Overhaul.HideMover(def.key)
+        return true
+    end
     local size = def.small and floor(s.size * 0.8 + 0.5) or s.size
     local step = size + s.spacing
-    local long = #buttons * step - s.spacing
-    local label = def.label .. (barShown(def) and "" or " (hidden right now)")
-    local mover = ns.Overhaul.Mover(def.key, label, def.vertical and size or long, def.vertical and long or size, def.default)
+    local n = min(wanted, #buttons)
+    perRow = min(perRow, n)
+    local rows = ceil(n / perRow)
+    -- across then down; the upright bars go down then across
+    local long, deep = perRow * step - s.spacing, rows * step - s.spacing
+    local label = def.label .. (barShown(def) and "" or " (hidden by the game's own settings)")
+    local mover = ns.Overhaul.Mover(def.key, label, def.vertical and deep or long, def.vertical and long or deep, def.default)
     for i, b in ipairs(buttons) do
-        skinButton(b, size)
-        pcall(b.ClearAllPoints, b)
-        if def.vertical then
-            pcall(b.SetPoint, b, "TOPLEFT", mover, "TOPLEFT", 0, -(i - 1) * step)
+        if i > n then
+            putAway(b)
         else
-            pcall(b.SetPoint, b, "TOPLEFT", mover, "TOPLEFT", (i - 1) * step, 0)
+            if away[b] then bringBack(b) end
+            skinButton(b, size)
+            pcall(b.ClearAllPoints, b)
+            local along, across = (i - 1) % perRow, floor((i - 1) / perRow)
+            -- (0 - x, not -x: a negative zero prints as "-0" and compares oddly)
+            if def.vertical then
+                pcall(b.SetPoint, b, "TOPLEFT", mover, "TOPLEFT", across * step, 0 - along * step)
+            else
+                pcall(b.SetPoint, b, "TOPLEFT", mover, "TOPLEFT", along * step, 0 - across * step)
+            end
         end
     end
     return true
@@ -533,7 +699,9 @@ end
 
 -- The experience bar's size: what the settings choose, or (0, or anything too small to be a
 -- size) as wide as a bar of twelve buttons and 8 tall.
-Bars.LIMITS = { xpWidth = { 100, 1200, 10 }, xpHeight = { 4, 40, 1 } }
+-- What the bar settings may be; the Settings tab's steppers use these too.
+Bars.LIMITS = { xpWidth = { 100, 1200, 10 }, xpHeight = { 4, 40, 1 }, buttons = { 1, 12, 1 }, perRow = { 1, 12, 1 },
+                size = { 20, 64, 2 }, spacing = { 0, 12, 1 } }
 function Bars.ExperienceSize()
     local s = settings()
     local L = Bars.LIMITS
@@ -763,6 +931,7 @@ function Bars.Apply()
             pcall(f.EnableMouse, f, false)
         end
     end
+    adoptGameToggles()   -- the game's toggles are saved by the game: they are the truth at login
     Bars.laid = {}
     for _, def in ipairs(BARS) do
         if layoutBar(def) then Bars.laid[#Bars.laid + 1] = def.key end
@@ -771,15 +940,16 @@ function Bars.Apply()
     layoutMicro()
     buildExperience()
     -- The game's own edit mode lays its bars out again when it closes; so does this, after.
-    if hooksecurefunc and type(EditModeManagerFrame) == "table" and type(EditModeManagerFrame.ExitEditMode) == "function" then
-        pcall(hooksecurefunc, EditModeManagerFrame, "ExitEditMode", function() Bars.Relayout() end)
+    if not Bars.editHooked and type(EditModeManagerFrame) == "table" and type(EditModeManagerFrame.HookScript) == "function" then
+        Bars.editHooked = true
+        pcall(EditModeManagerFrame.HookScript, EditModeManagerFrame, "OnHide", function() Bars.Relayout() end)
     end
     -- The bag bar chains its buttons to itself every time it lays out: put them back at once.
     local bagsBar = frame("BagsBar")
-    if hooksecurefunc and bagsBar and type(bagsBar.Layout) == "function" then
-        pcall(hooksecurefunc, bagsBar, "Layout", function()
+    if bagsBar then
+        ns.Overhaul.Hook(bagsBar, "Layout", function()
             if not (InCombatLockdown and InCombatLockdown()) then pcall(layoutBags) end
-        end)
+        end)   -- else the look once a second
     end
     -- And a look once a second, for whatever else moves a button.
     if not Bars.watch then
@@ -814,14 +984,44 @@ end
 function Bars.Check()
     -- art the game has made since the last look (these frames may be touched in combat)
     hideLooseArt()
-    if InCombatLockdown and InCombatLockdown() then return 0 end
-    local movers = ns.Overhaul.movers
+    local inCombat = InCombatLockdown and InCombatLockdown()
     local fixed = 0
+    -- the round button art the game sets again as a button gets an action: blank again
+    -- (its alpha may be set in combat)
+    for _, t in pairs(normals) do
+        local ok, a = pcall(t.GetAlpha, t)
+        if ok and type(a) == "number" and a > 0 then
+            pcall(t.SetAlpha, t, 0)
+            fixed = fixed + 1
+        end
+    end
+    -- a button put away that something has made visible again (alpha may be set in combat),
+    -- or that hears the mouse again (set right after combat, when it could not be)
+    for b in pairs(away) do
+        local ok, alpha = pcall(b.GetAlpha, b)
+        local okM, mouse = pcall(b.IsMouseEnabled, b)
+        if (ok and type(alpha) == "number" and alpha > 0) or (not inCombat and okM and mouse == true) then
+            keepAway(b, inCombat)
+            fixed = fixed + 1
+        end
+    end
+    if inCombat then return fixed end
+    -- a toggle changed in the game's own settings: the addon's switch follows it
+    for _, key in ipairs(adoptGameToggles()) do
+        for _, def in ipairs(BARS) do
+            if def.key == key then pcall(layoutBar, def) end
+        end
+        fixed = fixed + 1
+        if ns.SettingsUI and ns.SettingsUI.Refresh then pcall(ns.SettingsUI.Refresh) end
+    end
+    local movers = ns.Overhaul.movers
     for _, def in ipairs(BARS) do
         local mover = movers[def.key]
         if mover then
             for _, b in ipairs(buttonsOf(def)) do
-                if strayed(b, mover) then
+                if away[b] then
+                    -- put away: its place is of no account
+                elseif strayed(b, mover) then
                     pcall(layoutBar, def)
                     fixed = fixed + 1
                     break
@@ -878,7 +1078,79 @@ function Bars.OnEnteringWorld()
     Bars.Relayout()
 end
 
+-- /mint bars: what each bar is set to here, what the game is doing with it, and what its
+-- buttons look like right now, for telling the addon's doing from the game's.
+function Bars.Report()
+    local s = settings()
+    local toggles = gameToggles()
+    local db = ns.DB()
+    db.barsReport = {}
+    local say = ns.Say
+    ns.Say = function(text) say(text); db.barsReport[#db.barsReport + 1] = text end
+    local ok, err = pcall(function()
+    ns.Say("the action bars, as set here and as the game has them:")
+    for _, def in ipairs(BARS) do
+        local buttons = buttonsOf(def)
+        if #buttons > 0 then
+            local shown, wanted, perRow = barConfig(def)
+            local index = TOGGLE_INDEX[def.key]
+            local toggle = index and toggles and toggles[index]
+            local visible, seeThrough, deaf, putAside = 0, 0, 0, 0
+            for _, b in ipairs(buttons) do
+                local okS, isShown = pcall(b.IsVisible, b)
+                if okS and isShown == true then visible = visible + 1 end
+                local okA, alpha = pcall(b.GetAlpha, b)
+                if okA and type(alpha) == "number" and alpha == 0 then seeThrough = seeThrough + 1 end
+                local okM, mouse = pcall(b.IsMouseEnabled, b)
+                if okM and mouse == false then deaf = deaf + 1 end
+                if away[b] then putAside = putAside + 1 end
+            end
+            local mover = ns.Overhaul.movers[def.key]
+            ns.Say(sformat("  %s: here %s, %d buttons, %d to a %s; the game's toggle %s, its bar frame %s; %d of %d buttons visible, %d invisible, %d deaf to the mouse, %d put away here; box %s.",
+                def.label, shown and "shown" or "HIDDEN", wanted, perRow, def.vertical and "column" or "row",
+                toggle == nil and "none" or (toggle and "on" or "OFF"), barShown(def) and "shown" or "HIDDEN",
+                visible, #buttons, seeThrough, deaf, putAside, mover and (mover.off and "off" or "on") or "none"))
+        end
+    end
+    ns.Say(sformat("  button size %d, spacing %d. A bar with a toggle is shown or hidden through the game's toggle, from here or from the game's own settings alike.", s.size, s.spacing))
+    ns.Say(sformat("  the game's toggles: %s (bars 2 to 8). What setting them did, last first:", togglesText(toggles)))
+    local lines = type(db.barsLog) == "table" and db.barsLog or {}
+    for i = #lines, 1, -1 do ns.Say("    " .. lines[i]) end
+    if #lines == 0 then ns.Say("    nothing yet: no switch of a bar with a toggle has been flipped here.") end
+    end)
+    ns.Say = say
+    if not ok then ns.Say("the report broke off: " .. tostring(err)) end
+    db.barsReport.at = time()
+end
+
+-- Combat is over: a bar setting changed during it is applied now.
+function Bars.OnCombatEnd()
+    if not Bars.pendingRelayout then return end
+    Bars.pendingRelayout = nil
+    Bars.Relayout()
+end
+
 function Bars.OnSettingsChanged(path)
+    -- the buttons' size or the gap between them: every bar laid out again (after combat,
+    -- when in it); the pet and stance bars' buttons are four fifths of the size
+    if path == "bars.size" or path == "bars.spacing" then
+        if InCombatLockdown and InCombatLockdown() then Bars.pendingRelayout = true else Bars.Relayout() end
+    end
+    -- a bar's own settings: that bar laid out again (after combat, when in it)
+    local key = type(path) == "string" and path:match("^bars%.(%w+)%.")
+    if key then
+        for _, def in ipairs(BARS) do
+            if def.key == key then
+                if InCombatLockdown and InCombatLockdown() then
+                    Bars.pendingRelayout = true
+                else
+                    -- the switch of a bar the game has a toggle for sets the game's toggle
+                    if path:match("%.shown$") and TOGGLE_INDEX[key] then pcall(setGameToggle, key, (barConfig(def))) end
+                    pcall(layoutBar, def)
+                end
+            end
+        end
+    end
     if path == "bars.hideMicro" then pcall(placeMicro) end
     if path == "bars.extraBags" or path == "bars.hideBags" then pcall(layoutBags) end
     if path == "bars.xpClassColor" then refreshExperience() end

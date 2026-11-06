@@ -59,6 +59,7 @@ local ROOTS = {
     { "MultiBarBottomLeftButton1", 0 }, { "PetActionBar", 1 }, { "PetActionBarFrame", 1 }, { "PetActionButton1", 0 },
     { "StanceBar", 1 }, { "StanceBarFrame", 1 }, { "StanceButton1", 0 },
     { "PlayerFrame", 1 }, { "TargetFrame", 1 }, { "TargetFrameToT", 0 }, { "PetFrame", 0 }, { "ComboFrame", 0 },
+    { "PartyFrame", 2 }, { "PartyMemberFrame1", 1 }, { "CompactPartyFrame", 1 },
     { "ChatFrame1", 1 }, { "ChatFrame1Tab", 0 }, { "ChatFrame1EditBox", 0 }, { "ChatFrame1ButtonFrame", 1 },
     { "ChatFrameMenuButton", 0 }, { "ChatFrameChannelButton", 0 }, { "QuickJoinToastButton", 0 },
     { "BuffFrame", 0 }, { "CastingBarFrame", 0 }, { "PlayerCastingBarFrame", 0 }, { "EditModeManagerFrame", 0 },
@@ -105,8 +106,14 @@ local VENDOR_ROOTS = {
     { "MerchantFrame", 4 }, { "MerchantItem1", 3 }, { "MerchantBuyBackItem", 3 }, { "MerchantFrameTab1", 1 }, { "MerchantRepairAllButton", 1 },
     { "MerchantSellAllJunkButton", 1 }, { "MerchantMoneyFrame", 2 }, { "MerchantNextPageButton", 1 },
 }
+-- /mint uidump bars: the action bars and how the game keeps their visibility.
+local BARS_ROOTS = {
+    { "MainActionBar", 1 }, { "MainMenuBar", 1 }, { "ActionButton1", 2 }, { "MultiBarBottomLeft", 1 }, { "MultiBarBottomRight", 1 },
+    { "MultiBarRight", 1 }, { "MultiBarRightButton1", 2 }, { "MultiBarLeft", 1 }, { "MultiBar5", 1 }, { "MultiBar6", 1 }, { "MultiBar7", 1 },
+    { "PetActionBar", 1 }, { "StanceBar", 1 }, { "EditModeManagerFrame", 1 },
+}
 local GROUPS = { menus = MENU_ROOTS, bags = BAG_ROOTS, cast = CAST_ROOTS, chat = CHAT_ROOTS, meter = METER_ROOTS, loot = LOOT_ROOTS,
-                 vendor = VENDOR_ROOTS }
+                 vendor = VENDOR_ROOTS, bars = BARS_ROOTS }
 
 -- Functions and tables the overhaul would like to use.
 local APIS = {
@@ -270,6 +277,127 @@ end
 -- they were not already), the functions of each mixin (what there is to hook), the meter's
 -- own API and its settings. Nothing documents this client's meter; this finds it by name.
 local METER_EXTRA_MOST, METER_NAMES_MOST = 12, 80
+-- How this client keeps each bar shown or hidden: the old toggles, the cvars, and what the
+-- edit mode has for the bars (its enums, the functions it offers, the layouts' settings).
+local BAR_CVARS = { "alwaysShowActionBars", "multiBarRightVerticalLayout", "lockActionBars", "ActionButtonUseKeyDown" }
+local BAR_FRAME_NAMES = { "MainActionBar", "MultiBarBottomLeft", "MultiBarBottomRight", "MultiBarRight", "MultiBarLeft", "MultiBar5", "MultiBar6", "MultiBar7", "PetActionBar", "StanceBar" }
+local function barsInfo()
+    local info = { toggles = {}, cvars = {}, globals = {}, frames = {}, editMode = { enums = {}, api = {}, methods = {}, layouts = {} } }
+    if type(GetActionBarToggles) == "function" then
+        local r = { pcall(GetActionBarToggles) }
+        if r[1] then for i = 2, #r do info.toggles[i - 1] = plainValue(r[i]) end end
+    end
+    for _, name in ipairs(BAR_CVARS) do
+        local ok, v = type(GetCVar) == "function" and pcall(GetCVar, name)
+        info.cvars[name] = ok and v ~= nil and tostring(v) or false
+    end
+    for _, name in ipairs({ "SHOW_MULTI_ACTIONBAR_1", "SHOW_MULTI_ACTIONBAR_2", "SHOW_MULTI_ACTIONBAR_3", "SHOW_MULTI_ACTIONBAR_4", "ALWAYS_SHOW_MULTIBARS", "SetActionBarToggles", "MultiActionBar_Update", "MultiActionBar_ShowAllGrids" }) do
+        info.globals[name] = plainValue(_G[name])
+    end
+    for _, name in ipairs(BAR_FRAME_NAMES) do
+        local f = _G[name]
+        if type(f) == "table" then
+            local e = { shown = safe(f.IsShown, f) == true, visible = safe(f.IsVisible, f) == true }
+            local okA, a = pcall(f.GetAlpha, f)
+            e.alpha = okA and num(a) or false
+            local p = safe(f.GetParent, f)
+            e.parent = type(p) == "table" and str(safe(p.GetName, p)) or false
+            local names = {}
+            for k, v in pairs(f) do
+                if type(k) == "string" and type(v) == "function" and (k:find("Visib") or k:find("Shown") or k:find("Setting") or k:find("Grid")) then names[#names + 1] = k end
+            end
+            table.sort(names)
+            e.methods = names
+            -- the edit mode's number for this bar, and whether it says the bar is shown
+            if type(f.system) == "number" then e.system = f.system end
+            if type(f.systemIndex) == "number" then e.systemIndex = f.systemIndex end
+            info.frames[name] = e
+        end
+    end
+    if type(Enum) == "table" then
+        for name, t in pairs(Enum) do
+            if type(name) == "string" and (name:find("ActionBar") or name == "EditModeSystem") and type(t) == "table" then
+                local copy = {}
+                for k, v in pairs(t) do
+                    if type(k) == "string" and (type(v) == "number" or type(v) == "string") then copy[k] = v end
+                end
+                info.editMode.enums[name] = copy
+            end
+        end
+    end
+    if type(C_EditMode) == "table" then
+        for name, fn in pairs(C_EditMode) do
+            if type(name) == "string" and type(fn) == "function" then info.editMode.api[#info.editMode.api + 1] = name end
+        end
+        table.sort(info.editMode.api)
+    end
+    if type(EditModeManagerFrame) == "table" then
+        local names = {}
+        for k, v in pairs(EditModeManagerFrame) do
+            if type(k) == "string" and type(v) == "function" and (k:find("Bar") or k:find("Setting") or k:find("Visib") or k:find("Shown") or k:find("Layout")) then names[#names + 1] = k end
+        end
+        local mt = getmetatable(EditModeManagerFrame)
+        local methods = mt and type(mt.__index) == "table" and mt.__index or nil
+        if methods then
+            for k, v in pairs(methods) do
+                if type(k) == "string" and type(v) == "function" and (k:find("Bar") or k:find("Setting") or k:find("Visib") or k:find("Shown")) then names[#names + 1] = k end
+            end
+        end
+        table.sort(names)
+        info.editMode.methods = names
+    end
+    if type(C_EditMode) == "table" and type(C_EditMode.GetLayouts) == "function" then
+        local ok, all = pcall(C_EditMode.GetLayouts)
+        if ok and type(all) == "table" then
+            info.editMode.activeLayout = type(all.activeLayout) == "number" and all.activeLayout or false
+            for i, layout in ipairs(type(all.layouts) == "table" and all.layouts or {}) do
+                local entry = { name = type(layout.layoutName) == "string" and layout.layoutName or false, systems = {} }
+                for _, sys in ipairs(type(layout.systems) == "table" and layout.systems or {}) do
+                    if type(sys) == "table" and type(sys.system) == "number" then
+                        local settings = {}
+                        for _, st in ipairs(type(sys.settings) == "table" and sys.settings or {}) do
+                            if type(st) == "table" and type(st.setting) == "number" then settings[#settings + 1] = st.setting .. "=" .. tostring(st.value) end
+                        end
+                        entry.systems[#entry.systems + 1] = sys.system .. (type(sys.systemIndex) == "number" and ("#" .. sys.systemIndex) or "") .. ": " .. table.concat(settings, " ")
+                    end
+                end
+                info.editMode.layouts[i] = entry
+            end
+        end
+    end
+    return info
+end
+
+-- /mint uidump cast: what the game's cast bar has for the methods the addon has touched,
+-- as seen from here: where each is kept (on the frame itself, or inherited), its type, and
+-- whether the game counts it secure. For a client where the game finds no method after
+-- the addon has had a hand in it.
+local CAST_METHODS = { "SetStatusBarTexture", "SetStatusBarColor", "SetPoint", "ClearAllPoints", "SetSize", "Show", "Hide", "SetAlpha", "GetStatusBarTexture" }
+local function castInfo()
+    local info = { hooksSafe = ns.Overhaul and ns.Overhaul.ObjectHooksSafe() or false, hooksOn = ns.Overhaul and ns.Overhaul.OBJECT_HOOKS or false, bars = {} }
+    for _, name in ipairs({ "PlayerCastingBarFrame", "CastingBarFrame", "TargetFrameSpellBar" }) do
+        local f = _G[name]
+        if type(f) == "table" then
+            local e = {}
+            for _, method in ipairs(CAST_METHODS) do
+                local own = rawget(f, method)
+                local entry = { type = type(f[method]), own = own ~= nil and type(own) or false }
+                if type(issecurevariable) == "function" then
+                    local okS, secure = pcall(issecurevariable, f, method)
+                    entry.secure = okS and plainValue(secure) or "?"
+                end
+                e[method] = entry
+            end
+            local mt = getmetatable(f)
+            e.metatableIndex = mt and type(mt.__index) or "none"
+            local okT, tex = pcall(f.GetStatusBarTexture, f)
+            e.fill = okT and type(tex) == "table" and { atlas = str(safe(tex.GetAtlas, tex)), texture = plainValue(safe(tex.GetTexture, tex)) } or false
+            info.bars[name] = e
+        end
+    end
+    return info
+end
+
 local function meterInfo(out)
     local info = { globals = {}, mixins = {}, api = {}, cvars = {} }
     local names = {}
@@ -352,7 +480,7 @@ local function meterInfo(out)
 end
 
 -- The groups, in the order /mint uidump all takes them.
-local ORDER = { "screen", "menus", "bags", "cast", "chat", "meter", "loot", "vendor" }
+local ORDER = { "screen", "bars", "menus", "bags", "cast", "chat", "meter", "loot", "vendor" }
 Dump.GROUPS = ORDER
 
 -- The frame under the mouse: the topmost named frame it is part of (what is recorded), and
@@ -388,12 +516,13 @@ local function record(group, label, roots)
     local version, build, _, toc
     if GetBuildInfo then version, build, _, toc = GetBuildInfo() end
     local out = { at = time(), addon = ns.VERSION, version = version, build = build, toc = toc, apis = {}, frames = {}, missing = {},
-                  group = (GROUPS[group or ""] or group == "frame") and group or "screen" }
+                  group = (GROUPS[group or ""] or group == "frame" or group == "top") and group or "screen" }
     if ns.Menus then
         out.menus = {}
         for name, result in pairs(ns.Menus.windows) do out.menus[name] = result end
     end
     for _, name in ipairs(APIS) do out.apis[name] = type(_G[name]) end
+    out.apis.objectHooksSafe = ns.Overhaul and ns.Overhaul.ObjectHooksSafe() or false
     -- Which of the quest log's own functions this client has, and what it says is tracked.
     if type(C_QuestLog) == "table" then
         out.questApi = {}
@@ -443,6 +572,14 @@ local function record(group, label, roots)
         local ok, meter = pcall(meterInfo, out)
         out.meter = ok and meter or { error = tostring(meter) }
     end
+    if group == "bars" then
+        local ok, bars = pcall(barsInfo)
+        out.bars = ok and bars or { error = tostring(bars) }
+    end
+    if group == "cast" then
+        local ok, cast = pcall(castInfo)
+        out.cast = ok and cast or { error = tostring(cast) }
+    end
     out.count = nodes
     out.found = found
     if type(label) == "string" and label ~= "" then out.label = label end
@@ -488,7 +625,46 @@ local function finderInfo()
     return out
 end
 
+-- /mint uidump top: everything on the screen right now. Every named frame that hangs
+-- straight off the screen (UIParent) and is shown, each with its regions and its children
+-- one level down: a map of what is where, for a look that is off without a name to go on.
+-- The cap on nodes still holds; what is past it is left out, and the count says so.
+Dump.TOP_MOST = 400
+local function topRoots()
+    local roots, seen = {}, {}
+    if type(EnumerateFrames) ~= "function" then return roots end
+    local f = EnumerateFrames()
+    local guard = 0
+    while f and guard < 200000 do   -- (a client has some tens of thousands of frames)
+        guard = guard + 1
+        local okP, parent = pcall(f.GetParent, f)
+        if okP and parent == UIParent then
+            local okS, shown = pcall(f.IsShown, f)
+            local name = nameOf(f)
+            if okS and shown == true and type(name) == "string" and not name:find("^MintCommunityTools") and not seen[name] then
+                seen[name] = true
+                roots[#roots + 1] = { name, 1 }
+                if #roots >= Dump.TOP_MOST then break end
+            end
+        end
+        f = EnumerateFrames(f)
+    end
+    table.sort(roots, function(a, b) return a[1] < b[1] end)
+    return roots
+end
+
 function Dump.Run(group, label)
+    if group == "top" then
+        local roots = topRoots()
+        if #roots == 0 then
+            ns.Say("this client does not let an addon walk its frames (no EnumerateFrames): /mint uidump all, frame <Name> and mouse still work.")
+            return nil
+        end
+        local out = record("top", label, roots)
+        ns.Say(("recorded what is on the screen: %d frames hanging off it, %d frames and textures in all%s. Type /reload to write it to the save file."):format(
+            out.found, out.count, out.count >= MAX_NODES and " (the cap: the rest is left out)" or ""))
+        return out
+    end
     if group == "finder" then
         local out = finderInfo()
         local db = ns.DB()

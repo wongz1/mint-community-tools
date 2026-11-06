@@ -388,20 +388,19 @@ function Chat.Apply()
         end)
         -- Anything that fastens the window anywhere is looked at on the next frame.
         local main = frame("ChatFrame1")
-        if hooksecurefunc and main then
-            pcall(hooksecurefunc, main, "SetPoint", function()
-                if not placing then Chat.sinceCheck = 1 end
-            end)
-        end
+        ns.Overhaul.Hook(main, "SetPoint", function()
+            if not placing then Chat.sinceCheck = 1 end
+        end)   -- else the look once a second, below
         Chat.events:SetScript("OnUpdate", function(_, dt)
             Chat.sinceCheck = Chat.sinceCheck + (type(dt) == "number" and dt or 0)
             if Chat.sinceCheck < 1 then return end
             Chat.sinceCheck = 0
             Chat.Check()
         end)
+        -- the game's edit mode lays the window out again as it closes: looked at right after
         local manager = frame("EditModeManagerFrame")
-        if hooksecurefunc and manager and type(manager.ExitEditMode) == "function" then
-            pcall(hooksecurefunc, manager, "ExitEditMode", function() Chat.sinceCheck = 1 end)
+        if manager and type(manager.HookScript) == "function" then
+            pcall(manager.HookScript, manager, "OnHide", function() Chat.sinceCheck = 1 end)
         end
     end
     Chat.applied = true

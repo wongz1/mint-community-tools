@@ -1,5 +1,90 @@
 # Changelog
 
+## 0.5.9 - unreleased
+
+- **Scan cache.** A new button on the Loot tab (and `/mint cache`) reads every item the
+  client has cached — everything it has been told about by anyone linking, selling or
+  dropping an item — and files it with the items seen, so that **Export new items** carries
+  it all to the website. It is the same data as the client's `DBCache.bin`, read through the
+  game itself, so nothing needs uploading. The scan takes a second or two and asks nothing
+  of the server.
+- **`/mint uidump top`.** Records everything on the screen right now: every shown frame
+  hanging straight off the screen, with its regions and its children one level down, for a
+  look that is off without a name to go on.
+- **Spellbook fixes.** The school tabs across the top of the spellbook had lost their
+  pictures (the addon took them for plain buttons); they show again. The names and headings
+  on the page were drawn in the dark ink meant for the parchment and were hard to read on
+  the flat panel; they are light now, while grey names (spells not yet learned) and red
+  level notes keep their colour.
+- **Party frames.** The addon's own party frames: four frames in a column, one for each
+  party member, clickable like the rest, on one box in Mint edit mode. Built like the player
+  frame: a portrait (flat or 3D, as the portrait settings say), the health as a percentage,
+  and buff and debuff rows on the sides the Units page picks for the party (debuffs to the
+  right to start; one setting for all four, the debuffs limitable to your own), at a width
+  and height of their own. On by default with the unit frames (the Units page turns them
+  off, which gives the game's party window back), and out of the way in a raid, where the
+  game's raid frames show the same people.
+- **Sample party in edit mode.** While Mint edit mode is open the party frames show four
+  made-up members, with health, power, a portrait and a debuff or two on the side the
+  settings say, whoever is or is not in the party (in a raid too), so the frames can be
+  placed, sized and set up alone. The real party is back when edit mode closes, after combat
+  when it closes in combat.
+- **Button size and spacing.** Two steppers on the Bars page: the action buttons' size (20
+  to 64 pixels; the pet and stance bars' buttons are four fifths of it) and the gap between
+  them. Every bar follows at once, its box in edit mode too; the experience bar, when it has
+  no width of its own, stays as wide as a row of twelve buttons.
+- **Each action bar's own settings.** The Bars page has a row for every bar this client
+  has: a switch to hide the bar (its keybinds still work; its box leaves edit mode), how
+  many of its buttons show (1 to 12), and how many go to a row (fewer stack the rest
+  beneath: twelve buttons three to a row make four rows of three; beside, for the two
+  upright bars). The bar's box in edit mode takes the shape. A button put away is made
+  invisible and deaf to the mouse rather than hidden, since the game shows and hides its
+  buttons as it likes and would fight a hidden one; its keybind still works. A change made
+  in combat applies when it ends. For bars 2 to 8 the switch is the game's own toggle (the
+  one in the game's settings, which hides the whole bar frame), set from the addon and
+  followed when changed in the game's settings, so the two never disagree; bar 1, the pet
+  bar and the stance bar, which have no toggle, have their buttons made invisible instead.
+  `/mint bars` prints what each bar is set to here and what the game is doing with it, and
+  `/mint uidump bars` records how this client keeps its bars shown or hidden.
+- **Minimap size.** A stepper on the Minimap page of the Settings tab sizes the map, 100 to
+  400 pixels, at once; the strips above and below and the minimap button follow.
+- **Fixed:** a Lua error from the game's own code when the target started casting
+  (`TargetFrame.lua: attempt to call a nil value`). The target's cast bar had been hung off
+  the screen itself, which has no answer to what the bar asks of its parent; it now sits
+  under the addon's own target frame, which answers, and is put back under that frame each
+  time the game anchors it its own way.
+- **Fixed:** an error of the addon's own (`CastBars.lua: attempted to index a table that
+  cannot be indexed with secret keys`) when the target cast: what the game says the
+  target's bar is doing is a secret value on this client, and it was used to look the colour
+  up. A secret kind is taken for a plain cast now.
+- **Fixed:** errors from the game's own code wherever the addon had hooked a method of one
+  of the game's frames (`attempt to call a nil value` in `CastingBarFrame.lua` at the end of
+  every cast, in `ScrollBox.lua` as the Options window filled, and more). This client's secure
+  code finds nothing where an addon has hooked a frame's method. The addon now asks the client
+  once whether such hooks are safe, and where they are not, hooks none: each piece keeps its
+  frames by looking at them once a second, or by a script hook, which is safe everywhere.
+  `/mint uidump` records the answer (`objectHooksSafe`).
+- **Fixed:** the damage meter's bars erroring on refresh (`DamageMeterEntry.lua: attempt
+  to compare field 'sourceDisplayType' (a secret number value, while execution tainted by
+  'MintCommunityTools')`) and the meter left in its editing look. The right-click on the
+  meter's box had opened the game's Edit Mode settings box from the addon's own code and
+  saved the layout on its close; everything the game did from there carried the addon's
+  taint, which forbids comparing the secret numbers the server sends the meter. The box is
+  now a secure button that runs the game's own `/editmode` on a right-click: the game opens
+  its Edit Mode itself, you click the meter there for its settings and Save, and nothing of
+  it is the addon's doing. A `/reload` clears the taint from the current session.
+- **Fixed:** a Lua error from the game's own settings window (`ScrollBox.lua: attempt to
+  call a nil value`) while its categories were being made. The addon had hooked the Update
+  of the game's scrolling lists to dress their rows, and this client's secure code then found
+  no Update on the list at all. The lists are now asked to say when they update, through
+  their own callback registry, and nothing on them is replaced.
+- **Fixed:** a Lua error from the game's own code when a cast bar hid
+  (`Blizzard_ObjectiveTrackerContainer.lua: attempt to call a nil value`). The addon's hidden
+  parent for the game's frames had answered any method through a metatable of its own; this
+  client's secure code refuses that and then finds no method on the frame at all. The hidden
+  parent now has the one method it is known to be asked, as a plain field, and its own
+  metatable back.
+
 ## 0.5.8 - 2026-10-10
 
 - **Where loot dropped, in the item export.** When you open a corpse, the addon now notes

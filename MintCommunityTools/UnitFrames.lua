@@ -21,6 +21,14 @@
     has brought it along. A size cannot be changed in combat (the game does not let a
     frame it can click through to a unit be resized then); it is applied when combat ends.
 
+    The party: four frames in a column, one for each party member, clickable like the rest,
+    on one box in edit mode. Built like the player's frame (a portrait, flat or 3D as the
+    portrait settings say; buff and debuff rows on the sides the party settings pick, one
+    setting for all four), at a width and height of their own, the health as a percentage.
+    They are a setting (on by default), and stay out of the way in a raid, where the game's
+    raid frames show the same people. The game's party window is put away while they are
+    on, and given back when they are turned off.
+
     The game's own player, target, target-of-target and pet frames are hidden. The combo
     points, class resources and the target's cast bar are the game's still, re-anchored.
     Every API is feature-detected and run under pcall: the WoW Forever client is a beta.
@@ -47,8 +55,24 @@ local UNITS = {
     { key = "target", unit = "target", label = "Target frame", auras = true, watch = true, default = { "BOTTOM", 200, 220 } },
     { key = "tot", unit = "targettarget", label = "Target of target", watch = true, default = { "BOTTOM", 400, 231 } },
     { key = "pet", unit = "pet", label = "Pet frame", watch = true, default = { "BOTTOM", -250, 274 } },
+    -- the party: four frames in a column, on one box in edit mode (the group's), with a
+    -- portrait and aura rows like the player's and the target's, at a size of their own
+    -- (`size`), their aura rows set under one key for all four (`cfg`), the health as a
+    -- percentage (`percent`) for the room there is
+    { key = "party1", unit = "party1", watch = true, auras = true, percent = true, group = "party", index = 1, size = "party", cfg = "party" },
+    { key = "party2", unit = "party2", watch = true, auras = true, percent = true, group = "party", index = 2, size = "party", cfg = "party" },
+    { key = "party3", unit = "party3", watch = true, auras = true, percent = true, group = "party", index = 3, size = "party", cfg = "party" },
+    { key = "party4", unit = "party4", watch = true, auras = true, percent = true, group = "party", index = 4, size = "party", cfg = "party" },
 }
 Units.UNITS = UNITS
+-- A group of frames that share one box: its label there, where the box starts out, how
+-- many frames stand in its column, and the settings that size them.
+local GROUPS = {
+    party = { label = "Party frames", default = { "TOPLEFT", 20, -260 }, count = 4, width = "partyWidth", height = "partyHeight" },
+}
+local GROUP_GAP = 4
+-- The game's party window, put away while the addon's party frames are on.
+local PARTY_GAME = { "PartyFrame", "PartyMemberFrame1", "PartyMemberFrame2", "PartyMemberFrame3", "PartyMemberFrame4" }
 
 -- Events that are about one unit (the first argument says which).
 local UNIT_EVENTS = {
@@ -78,6 +102,7 @@ local FONTS = {
 Units.LIMITS = {
     fontSize = { 8, 20, 1 }, width = { 120, 400, 10 }, height = { 30, 90, 2 },
     smallWidth = { 80, 260, 10 }, smallHeight = { 16, 50, 2 },
+    partyWidth = { 80, 400, 10 }, partyHeight = { 16, 90, 2 },
     buffSize = { 12, 48, 2 }, debuffSize = { 12, 48, 2 }, perRow = { 4, 16, 1 },
 }
 
@@ -143,8 +168,9 @@ function Units.NextFont(key)
 end
 
 -- A frame's width and height: the player and target frames share one size, the two small
--- frames another.
+-- frames another, the party frames a third.
 local function dims(def)
+    if def.size == "party" then return limited("partyWidth"), limited("partyHeight") end
     if def.auras then return limited("width"), limited("height") end
     return limited("smallWidth"), limited("smallHeight")
 end
@@ -174,6 +200,10 @@ end
 
 local function exists(unit)
     return flag(call(UnitExists, unit))
+end
+
+local function inRaid()
+    return flag(call(IsInRaid))
 end
 
 -- A number as text: "1,234" when the addon may read it; for a secret one, the game's own
@@ -278,7 +308,7 @@ local function updateHealth(f)
     if not isSecret(connected) and connected == false then text = "Offline"
     elseif flag(call(UnitIsGhost, unit)) then text = "Ghost"
     elseif flag(call(UnitIsDead, unit)) then text = "Dead"
-    elseif not f.def.auras then text = percentText(unit, cur, maxv, secret)   -- the small frames: a percentage
+    elseif f.def.percent or not f.def.auras then text = percentText(unit, cur, maxv, secret)   -- the small frames and the party: a percentage
     else
         local ok, joined = pcall(sformat, "%s / %s", numberText(cur), numberText(maxv))
         text = ok and joined or ""
@@ -429,10 +459,11 @@ end
 
 local function updateAuraSet(f, kind)
     local s = settings()
-    local cfg = s[f.def.key]
+    local cfg = s[f.def.cfg or f.def.key]
     local set = f.auras[kind]
     local side = cfg and cfg[kind] or "off"
-    if not SIDES[side] or side == "off" or not exists(f.unit) then
+    local sample = Units.previewing and f.def.group and Units.SAMPLE_AURAS[kind] or nil
+    if not SIDES[side] or side == "off" or (not sample and not exists(f.unit)) then
         set.frame:Hide()
         set.shown = false
         return
@@ -446,7 +477,8 @@ local function updateAuraSet(f, kind)
     local dir = side == "above" and 1 or -1
     local n = 0
     for i = 1, 40 do
-        local a = auraAt(f.unit, i, filter)
+        local a
+        if sample then a = sample[i] else a = auraAt(f.unit, i, filter) end
         if not a then break end
         n = n + 1
         local b = set.buttons[n] or makeAuraButton(set, n)
@@ -506,7 +538,7 @@ end
 -- Puts the aura rows on their sides: debuffs nearest the frame, buffs beyond them when
 -- both are on the same side.
 local function placeAuras(f)
-    local cfg = settings()[f.def.key]
+    local cfg = settings()[f.def.cfg or f.def.key]
     if not cfg then return end
     local used = {}
     for _, kind in ipairs({ "debuffs", "buffs" }) do
@@ -542,17 +574,23 @@ end
 
 -- Without RegisterUnitWatch, the frame follows the unit by hand.
 local function updateVisibility(f)
+    if Units.previewing and f.def.group then
+        f:Show()
+        return
+    end
     if f.watched then return end
     if exists(f.unit) then f:Show() else f:Hide() end
 end
 
 local function onEvent(self, event, arg1)
+    -- a frame showing a sample member keeps it whatever the real party does
+    if Units.previewing and self.def.group then return end
     if event == "PLAYER_TARGET_CHANGED" then
         updateVisibility(self)
         updateAll(self)
         return
     end
-    if event == "PLAYER_ENTERING_WORLD" then
+    if event == "PLAYER_ENTERING_WORLD" or event == "GROUP_ROSTER_UPDATE" then
         updateVisibility(self)
         updateAll(self)
         return
@@ -605,6 +643,83 @@ local function applyFonts(f)
     f.fontPath, f.fontSize = path, size
 end
 
+---------------------------------------------------------------------------
+-- A group of frames on one box (the party)
+---------------------------------------------------------------------------
+
+local groups = {}   -- group key -> the frame its members hang off, which the box moves
+
+-- Whether a group's frames are to be seen at all: the party's are a setting, and stay out
+-- of the way in a raid, where the game's raid frames show the same people.
+local function partyOn()
+    local party = settings().party
+    return type(party) == "table" and party.enabled ~= false
+end
+
+local function groupWanted(key)
+    if key == "party" then return partyOn() and (Units.previewing or not inRaid()) end
+    return true
+end
+
+-- Not in combat: the holder's frames are secure, and the game does not let their parent be
+-- shown or hidden then; Units.OnCombatEnd does it after.
+local function showGroup(key)
+    local holder = groups[key]
+    if not holder then return end
+    if InCombatLockdown and InCombatLockdown() then
+        Units.pendingGroup = true
+        return
+    end
+    if groupWanted(key) then holder:Show() else holder:Hide() end
+end
+
+local function groupHolder(key)
+    local holder = groups[key]
+    if holder then return holder end
+    holder = CreateFrame("Frame", "MintCommunityTools" .. capitalize(key) .. "Frame", UIParent)
+    holder.group = key
+    holder:SetSize(1, 1)
+    groups[key] = holder
+    pcall(holder.RegisterEvent, holder, "GROUP_ROSTER_UPDATE")
+    pcall(holder.RegisterEvent, holder, "PLAYER_ENTERING_WORLD")
+    holder:SetScript("OnEvent", function(self) showGroup(self.group) end)
+    return holder
+end
+
+-- The column: the group's frames one under the other on its holder, the holder and its box
+-- the column's size. Not in combat (the frames are secure).
+local function layoutGroup(key)
+    local holder, g = groups[key], GROUPS[key]
+    if not holder or not g then return end
+    local w, h = limited(g.width), limited(g.height)
+    local height = g.count * h + (g.count - 1) * GROUP_GAP
+    holder:SetSize(w, height)
+    local mover = ns.Overhaul.Mover(key, g.label, w, height, g.default)
+    holder:ClearAllPoints()
+    holder:SetPoint("TOPLEFT", mover, "TOPLEFT", 0, 0)
+    for _, f in pairs(frames) do
+        if f.def.group == key then
+            f:ClearAllPoints()
+            f:SetPoint("TOPLEFT", holder, "TOPLEFT", 0, -(f.def.index - 1) * (h + GROUP_GAP))
+        end
+    end
+end
+
+-- The party frames on or off: the game's party window put away or given back, the
+-- addon's shown or hidden with their box.
+local function applyParty()
+    local O = ns.Overhaul
+    local on = partyOn()
+    for _, name in ipairs(PARTY_GAME) do
+        local f = frame(name)
+        if f then
+            if on then O.HideBlizzard(f, true) else O.ShowBlizzard(f) end
+        end
+    end
+    if on then layoutGroup("party") else O.HideMover("party") end
+    showGroup("party")
+end
+
 -- The frame and its mover at the size the settings give. Not in combat: the game does not
 -- let a secure frame be resized then; Units.OnCombatEnd does it afterwards.
 local function resize(f)
@@ -614,7 +729,11 @@ local function resize(f)
     end
     local w, h = dims(f.def)
     f:SetSize(w, h)
-    ns.Overhaul.Mover(f.def.key, f.def.label, w, h, f.def.default)
+    if f.def.group then
+        layoutGroup(f.def.group)
+    else
+        ns.Overhaul.Mover(f.def.key, f.def.label, w, h, f.def.default)
+    end
     return true
 end
 
@@ -723,6 +842,7 @@ local function build(def)
     for _, ev in ipairs(UNIT_EVENTS) do pcall(f.RegisterEvent, f, ev) end
     pcall(f.RegisterEvent, f, "PLAYER_ENTERING_WORLD")
     if def.watch then pcall(f.RegisterEvent, f, "PLAYER_TARGET_CHANGED") end
+    if def.group then pcall(f.RegisterEvent, f, "GROUP_ROSTER_UPDATE") end
     f:SetScript("OnEvent", onEvent)
 
     if def.watch then
@@ -733,11 +853,16 @@ local function build(def)
         end
     end
 
-    local width, height = dims(def)
-    local mover = ns.Overhaul.Mover(def.key, def.label, width, height, def.default)
-    f:ClearAllPoints()
-    f:SetPoint("TOPLEFT", mover, "TOPLEFT", 0, 0)
     frames[def.key] = f
+    if def.group then
+        f:SetParent(groupHolder(def.group))
+        layoutGroup(def.group)
+    else
+        local width, height = dims(def)
+        local mover = ns.Overhaul.Mover(def.key, def.label, width, height, def.default)
+        f:ClearAllPoints()
+        f:SetPoint("TOPLEFT", mover, "TOPLEFT", 0, 0)
+    end
     updateAll(f)
     return f
 end
@@ -745,6 +870,45 @@ end
 ---------------------------------------------------------------------------
 -- The game's own frames
 ---------------------------------------------------------------------------
+
+-- The target's cast bar, under the addon's target frame. When it shows, the game asks the
+-- bar's parent (which it means to be the target frame) two things: whether the bar hangs
+-- off the aura rows, and for the aura container, whose forbidden aspects the bar takes on.
+-- The addon's target frame answers: no, and the game's own target frame's container (that
+-- frame still exists, hidden). The game then anchors the bar under its parent in its own
+-- way; it is put where the addon wants it right after, each time.
+local function placeTargetCast()
+    local cast = frame("TargetFrameSpellBar")
+    if not cast or not frames.target then return end
+    pcall(cast.ClearAllPoints, cast)
+    -- under the frame: its text is on the bar when the cast bars are flat, in a box below
+    -- it when they are the game's
+    pcall(cast.SetPoint, cast, "TOP", frames.target, "BOTTOM", 0, ns.Overhaul.Active("cast") and -8 or -60)
+end
+
+local castHooked = false
+local function keepTargetCast()
+    local cast, mine = frame("TargetFrameSpellBar"), frames.target
+    if not cast or not mine then return end
+    local game = frame("TargetFrame")
+    mine.ShouldAnchorSpellBarToAuraContainer = function() return false end
+    mine.GetAuraContainer = function()
+        if game and type(game.GetAuraContainer) == "function" then
+            local ok, c = pcall(game.GetAuraContainer, game)
+            if ok and type(c) == "table" then return c end
+        end
+        return mine
+    end
+    mine.GetInheritableForbiddenAspects = function() return {} end
+    pcall(cast.SetParent, cast, mine)
+    cast.ignoreFramePositionManager = true
+    placeTargetCast()
+    -- the game anchors the bar its own way as it shows (its OnShow): put back right after
+    if not castHooked and type(cast.HookScript) == "function" then
+        castHooked = true
+        pcall(cast.HookScript, cast, "OnShow", placeTargetCast)
+    end
+end
 
 local function hideBlizzard()
     local O = ns.Overhaul
@@ -754,15 +918,7 @@ local function hideBlizzard()
         pcall(combo.ClearAllPoints, combo)
         pcall(combo.SetPoint, combo, "BOTTOMRIGHT", frames.target, "TOPRIGHT", 0, 2)
     end
-    local cast = frame("TargetFrameSpellBar")
-    if cast and frames.target then
-        pcall(cast.SetParent, cast, UIParent)
-        pcall(cast.ClearAllPoints, cast)
-        -- under the frame: its text is on the bar when the cast bars are flat, in a box
-        -- below it when they are the game's
-        pcall(cast.SetPoint, cast, "TOP", frames.target, "BOTTOM", 0, ns.Overhaul.Active("cast") and -8 or -60)
-        cast.ignoreFramePositionManager = true
-    end
+    keepTargetCast()
     -- Class resources (combo points, totems) hang off the player frame on a newer client:
     -- kept, under the addon's player frame.
     if frames.player then
@@ -784,6 +940,7 @@ local function hideBlizzard()
     for _, name in ipairs({ "PlayerFrame", "TargetFrame", "TargetFrameToT", "TargetofTargetFrame", "PetFrame" }) do
         O.HideBlizzard(frame(name))
     end
+    applyParty()
 end
 
 function Units.Apply()
@@ -809,10 +966,112 @@ function Units.OnSettingsChanged()
         updatePortrait(f)
         updateAuras(f)
     end
+    -- the party on or off: the game's window is secure, so this too waits for combat to end
+    if InCombatLockdown and InCombatLockdown() then
+        Units.pendingResize = true
+    else
+        applyParty()
+    end
 end
 
--- Combat is over: a size change that had to wait is made now.
+---------------------------------------------------------------------------
+-- Sample members, for arranging the party frames without a party
+---------------------------------------------------------------------------
+
+-- While Mint edit mode is open the party frames show four made-up members (and a debuff or
+-- two on the side the settings say), whoever is or is not in the party, so that the frames
+-- can be placed, sized and set up alone. The real party is back when edit mode closes.
+Units.SAMPLES = {
+    { name = "Aldric Thornwood", class = "WARRIOR", health = 100, power = "RAGE", powerValue = 35, level = 60 },
+    { name = "Bryn Ashvale", class = "PRIEST", health = 72, power = "MANA", powerValue = 80, level = 58 },
+    { name = "Cael Duskmere", class = "ROGUE", health = 45, power = "ENERGY", powerValue = 100, level = 60 },
+    { name = "Dara Flintlock", class = "MAGE", health = 90, power = "MANA", powerValue = 55, level = 57 },
+}
+local SAMPLE_ICON = "Interface\\Icons\\INV_Misc_QuestionMark"
+Units.SAMPLE_AURAS = {
+    debuffs = { { name = "Sample debuff", icon = "Interface\\Icons\\Spell_Shadow_ShadowWordPain", dispel = "Magic", count = 2 },
+                { name = "Sample debuff", icon = "Interface\\Icons\\Ability_Rogue_Rupture" } },
+    buffs = { { name = "Sample buff", icon = "Interface\\Icons\\Spell_Holy_WordFortitude" } },
+}
+Units.previewing = false
+
+local function showSample(f, sample)
+    pcall(f.name.SetText, f.name, sample.name)
+    pcall(f.health.SetMinMaxValues, f.health, 0, 100)
+    pcall(f.health.SetValue, f.health, sample.health)
+    local c = settings().classColor and RAID_CLASS_COLORS and RAID_CLASS_COLORS[sample.class]
+    if type(c) == "table" and type(c.r) == "number" then f.health:SetStatusBarColor(c.r, c.g, c.b)
+    else f.health:SetStatusBarColor(0.2, 0.7, 0.2) end
+    pcall(f.healthText.SetText, f.healthText, sformat("%d%%", sample.health))
+    pcall(f.power.SetMinMaxValues, f.power, 0, 100)
+    pcall(f.power.SetValue, f.power, sample.powerValue)
+    local pc = POWER_FALLBACK[sample.power] or POWER_FALLBACK.MANA
+    f.power:SetStatusBarColor(pc[1], pc[2], pc[3])
+    if f.powerText then pcall(f.powerText.SetText, f.powerText, "") end
+    if f.level then pcall(f.level.SetText, f.level, tostring(sample.level)) end
+    if f.portrait then
+        if f.model then f.model:Hide() end
+        if settings().portrait then
+            pcall(f.portrait.SetTexture, f.portrait, SAMPLE_ICON)
+            f.portrait:Show()
+        else
+            f.portrait:Hide()
+        end
+    end
+    updateAuras(f)
+end
+
+-- The sample members on or off. Off in combat waits for combat to end (showing and hiding
+-- the frames is the game's to allow then).
+function Units.Preview(on)
+    on = on and true or false
+    if on == Units.previewing then return true end
+    if InCombatLockdown and InCombatLockdown() then
+        Units.pendingPreview = on
+        return false
+    end
+    Units.pendingPreview = nil
+    Units.previewing = on
+    for _, def in ipairs(UNITS) do
+        local f = def.group and frames[def.key]
+        if f then
+            if on then
+                if f.watched and type(UnregisterUnitWatch) == "function" then pcall(UnregisterUnitWatch, f) end
+                f:Show()
+                showSample(f, Units.SAMPLES[def.index] or Units.SAMPLES[1])
+            else
+                if f.watched and type(RegisterUnitWatch) == "function" then pcall(RegisterUnitWatch, f) end
+                updateVisibility(f)
+                if exists(f.unit) then
+                    updateName(f)
+                    updateHealth(f)
+                    updatePower(f)
+                end
+                updatePortrait(f)
+                updateAuras(f)
+            end
+        end
+    end
+    showGroup("party")
+    return true
+end
+
+-- Mint edit mode opened or closed.
+function Units.OnEdit(on)
+    Units.Preview(on)
+end
+
+-- Combat is over: a size change, or a preview change, that had to wait is made now.
 function Units.OnCombatEnd()
+    if Units.pendingGroup then
+        Units.pendingGroup = nil
+        for key in pairs(groups) do showGroup(key) end
+    end
+    if Units.pendingPreview ~= nil then
+        local want = Units.pendingPreview
+        Units.pendingPreview = nil
+        Units.Preview(want)
+    end
     if not Units.pendingResize then return end
     Units.pendingResize = nil
     Units.OnSettingsChanged()

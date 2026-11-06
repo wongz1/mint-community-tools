@@ -470,6 +470,88 @@ function Loot.OnEvent(event, ...)
 end
 
 ---------------------------------------------------------------------------
+-- The client's item cache
+---------------------------------------------------------------------------
+
+-- Everything this client has been told about an item (by anyone linking, selling or
+-- dropping it) sits in its cache (DBCache.bin). An addon cannot open files, but the cache
+-- can be read through the API without touching one: C_Item.IsItemDataCachedByID says
+-- whether an id is there WITHOUT asking the server, and GetItemInfo answers at once for
+-- those. A scan walks the ids a few thousand a frame and files every cached item the way
+-- one seen dropping is filed (with no sighting of its own), so that the next "Export new
+-- items" carries it to the website. Nothing is asked of the server.
+Loot.CACHE_IDS_MOST = 250000
+Loot.CACHE_STEP = 5000
+local scan   -- the scan under way: { id, found, new, onProgress }
+
+local function rememberCached(item, t)
+    if item.suffix then return false end
+    local items = ns.DB().items
+    local cur = items[item.id]
+    local o = Loot.Observation(item)
+    if type(cur) ~= "table" then
+        o.seen, o.first, o.last, o.cached = 0, t, t, true
+        items[item.id] = o
+        return true
+    end
+    for _, k in ipairs(Loot.OBSERVATION_KEYS) do
+        if o[k] ~= nil then cur[k] = o[k] end
+    end
+    return false
+end
+
+function Loot.CanScanCache()
+    return type(C_Item) == "table" and type(C_Item.IsItemDataCachedByID) == "function"
+end
+
+function Loot.Scanning()
+    return scan ~= nil
+end
+
+local function scanStep()
+    if not scan then return end
+    local getInfo = (C_Item and C_Item.GetItemInfo) or GetItemInfo
+    local t = now()
+    local last = math.min(scan.id + Loot.CACHE_STEP - 1, Loot.CACHE_IDS_MOST)
+    for id = scan.id, last do
+        local ok, cached = pcall(C_Item.IsItemDataCachedByID, id)
+        if ok and cached == true then
+            local okInfo, _, link = pcall(getInfo, id)
+            if okInfo and type(link) == "string" then
+                local item = Loot.Describe(link)
+                if item and not item.suffix then
+                    scan.found = scan.found + 1
+                    if rememberCached(item, t) then scan.new = scan.new + 1 end
+                end
+            end
+        end
+    end
+    scan.id = last + 1
+    local done = scan.id > Loot.CACHE_IDS_MOST
+    local state = scan
+    if done then
+        scan = nil
+        notify()
+    end
+    if state.onProgress then pcall(state.onProgress, state, done) end
+end
+
+-- Starts a scan; `onProgress(state, done)` is told after every step. Returns true, or
+-- false and the reason there will be none.
+function Loot.ScanCache(onProgress)
+    if not Loot.CanScanCache() then
+        return false, "this client cannot say which items it has cached, and asking it item by item would ask the server for each: nothing scanned."
+    end
+    if scan then return false, "a scan is already under way." end
+    scan = { id = 1, found = 0, new = 0, onProgress = onProgress }
+    if not Loot.scanFrame then
+        Loot.scanFrame = CreateFrame("Frame")
+        Loot.scanFrame:SetScript("OnUpdate", function() if scan then scanStep() end end)
+    end
+    return true
+end
+
+---------------------------------------------------------------------------
 -- Export for the website's item database
 ---------------------------------------------------------------------------
 

@@ -105,23 +105,34 @@ local function number(fn, obj, fallback)
     return fallback
 end
 
--- The fill's colour for what the game says the bar is doing.
+-- The fill's colour for what the game says the bar is doing. What the game says may be a
+-- secret value (the target's bar, on this client): a secret cannot be looked up, so the bar
+-- is taken for a plain cast and gets the class colour.
 function Cast.Color(bar)
-    local kind = type(bar.barType) == "string" and bar.barType or "standard"
+    local kind = bar.barType
+    if type(kind) ~= "string" or (issecretvalue and issecretvalue(kind)) then kind = "standard" end
     local c = COLORS[kind]
     if c then return c[1], c[2], c[3] end
     local r, g, b = ns.W.accent()
     return r, g, b
 end
 
+-- A value the game gave that the addon may look at: not a secret (the target's bar hands
+-- out secrets on this client, which may be passed on but not compared or looked up).
+local function plain(v)
+    if issecretvalue and issecretvalue(v) then return nil end
+    return v
+end
+
 -- Takes the picture off one of a bar's effect textures, once; its atlas or file is written
--- down so that it can have it back.
+-- down so that it can have it back. A secret atlas or file is kept as it is, unlooked at,
+-- and given back the same way.
 local function blankEffect(tex)
     if type(tex) ~= "table" or type(tex.SetTexture) ~= "function" then return false end
     local atlas, file
     if type(tex.GetAtlas) == "function" then
         local ok, a = pcall(tex.GetAtlas, tex)
-        if ok and type(a) == "string" and a ~= "" then atlas = a end
+        if ok and type(a) == "string" and (plain(a) == nil or a ~= "") then atlas = a end
     end
     if not atlas and type(tex.GetTexture) == "function" then
         local ok, f = pcall(tex.GetTexture, tex)
@@ -231,8 +242,19 @@ local function skin(bar)
     end
     if not skinned[bar] then
         skinned[bar] = true
-        if hooksecurefunc and type(bar.SetStatusBarTexture) == "function" then
-            pcall(hooksecurefunc, bar, "SetStatusBarTexture", fill)
+        -- the game puts its own picture on the fill as a cast starts, ends or is interrupted:
+        -- flattened again right after, by a hook where hooking is safe, else by a look at
+        -- the fill every frame the bar is shown (one GetAtlas: nothing, until the game's
+        -- picture is there)
+        if not ns.Overhaul.Hook(bar, "SetStatusBarTexture", fill) and type(bar.HookScript) == "function" then
+            pcall(bar.HookScript, bar, "OnUpdate", function(self)
+                if busy or ns.Menus.IsOff("cast") then return end
+                local tex = self.GetStatusBarTexture and self:GetStatusBarTexture()
+                if tex and type(tex.GetAtlas) == "function" then
+                    local ok, atlas = pcall(tex.GetAtlas, tex)
+                    if ok and type(atlas) == "string" then fill() end   -- (type, not a comparison: it may be a secret)
+                end
+            end)
         end
         if type(bar.HookScript) == "function" then
             -- a cast starting shows the bar: the game may have put its text back under it
@@ -325,11 +347,9 @@ function Cast.Apply()
         if not Cast.events then
             -- The game places the bar itself, whenever it lays out the bottom of the screen:
             -- it goes back on its mover in the same breath.
-            if hooksecurefunc and type(player.SetPoint) == "function" then
-                pcall(hooksecurefunc, player, "SetPoint", function(_, _, anchor)
-                    if not placing and anchor ~= ns.Overhaul.movers.castbar then Cast.Place() end
-                end)
-            end
+            ns.Overhaul.Hook(player, "SetPoint", function(_, _, anchor)
+                if not placing and anchor ~= ns.Overhaul.movers.castbar then Cast.Place() end
+            end)   -- else the look once a second, below
             -- And a look once a second, for after the game's own edit mode closes.
             Cast.events = CreateFrame("Frame")
             local elapsed = 0

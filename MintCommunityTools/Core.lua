@@ -7,6 +7,8 @@
     /mint loot               open the window on the Loot tab
     /mint watch              show or hide the loot watcher
     /mint items [all]        export the items seen for the website: what is new, or all of them
+    /mint cache              scan the client's item cache into the items seen, for Export new items
+    /mint bars               what each action bar is set to here, and what the game is doing with it
     /mint dungeons           export the group finder's instances with their level bands, for the website
     /mint minimap [show | hide | reset]   the minimap button
     /mint minimap round | square | auto   the shape of the minimap the button sits around
@@ -14,6 +16,7 @@
     /mint edit               edit mode: drag the overhaul's frames where you want them
     /mint uidump [all | menus | bags | cast | chat | meter | loot | vendor] [name]
     /mint uidump frame <Name> | mouse | finder   record what this client's own interface is made of
+    /mint uidump top         record everything on the screen right now: every shown frame hanging off it
                              (for bug reports); "menus" records the game menu and the windows
                              it opens instead, "bags" the bag windows (have them open), "cast"
                              the cast bars, "chat" the chat windows, "meter" the game's damage
@@ -50,7 +53,7 @@
 
 local ADDON, ns = ...
 ns.NAME = "MintCommunityTools"
-ns.VERSION = "0.5.8"
+ns.VERSION = "0.5.9"
 
 -- True when Saved.lua has already put the last save in place. The client's own loading,
 -- when it works, happens later, at ADDON_LOADED.
@@ -314,6 +317,10 @@ SlashCmdList["MINTCOMMUNITYTOOLS"] = function(msg)
         ns.LootUI.ToggleWatch()
     elseif cmd == "items" then
         ns.LootUI.ExportItems(arg == "all")
+    elseif cmd == "cache" then
+        ns.LootUI.ScanCache()
+    elseif cmd == "bars" then
+        if ns.Bars and ns.Bars.applied then ns.Bars.Report() else ns.Say("the action bars piece is not set up: nothing to report.") end
     elseif cmd == "dungeons" then
         ns.UI.Show("gear")
         ns.UI.ExportDungeons()

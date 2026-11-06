@@ -109,6 +109,7 @@ local function stub(name, template)
       if k == "GetNumPoints" then return #(rawget(self, "_points") or {}) end
       if k == "SetTexture" then rawset(self, "_texture", (...)); return end
       if k == "SetTextColor" then rawset(self, "_textColor", { ... }); return end
+      if k == "GetTextColor" then local c = rawget(self, "_textColor") or { 1, 1, 1, 1 }; return c[1], c[2], c[3], c[4] end
       if k == "SetUnit" then rawset(self, "_unit", (...)); return end
       if k == "SetFont" then rawset(self, "_font", { ... }); return end
       if k == "SetColorTexture" then rawset(self, "_colorTexture", { ... }); return end
@@ -144,7 +145,12 @@ local function stub(name, template)
       if k == "SetStatusBarColor" then rawset(self, "_color", { ... }); return end
       if k == "SetBackdropBorderColor" then rawset(self, "_borderColor", { ... }); return end
       if k == "SetParent" then rawset(self, "_parent", (...)); return end
+      if k == "SetAllPoints" then rawset(self, "_allPoints", (...)); return end
       if k == "SetAlpha" then rawset(self, "_alpha", (...)); return end
+      if k == "SetAttribute" then local a = rawget(self, "_attributes") or {}; a[(...)] = select(2, ...); rawset(self, "_attributes", a); return end
+      if k == "GetAttribute" then local a = rawget(self, "_attributes"); return a and a[(...)] end
+      if k == "GetAlpha" then local a = rawget(self, "_alpha"); if a == nil then a = 1 end; return a end
+      if k == "IsMouseEnabled" then local m = rawget(self, "_mouse"); if m == nil then m = true end; return m end
       if k == "SetMaskTexture" then rawset(self, "_mask", (...)); return end
       if k == "SetSize" then rawset(self, "_size", { ... }); return end
       if k == "SetChecked" then rawset(self, "_checked", (...) and true or false); return end
@@ -271,6 +277,7 @@ local env = {
     return 135000 + slot
   end,
   GetItemInfo = function(link)
+    if type(link) == "number" then link = LOOT[link] and LOOT[link].link or ("item:" .. link) end   -- by id, as the cache scan asks
     local loot = LOOT[itemIdOf(link) or 0]
     if loot then
       if not loot.info then return nil end
@@ -303,7 +310,7 @@ local env = {
 -- The game's own UI, as named frames the overhaul looks up.
 local function named(name) local f = stub(name); env[name] = f; return f end
 for _, n in ipairs({
-  "PlayerFrame", "TargetFrame", "TargetFrameToT", "PetFrame", "ComboFrame", "TargetFrameSpellBar",
+  "PlayerFrame", "TargetFrame", "TargetFrameToT", "PetFrame", "ComboFrame", "TargetFrameSpellBar", "PartyFrame",
   "MainMenuBar", "MainMenuBarArtFrame", "MainMenuExpBar", "ReputationWatchBar", "MultiBarBottomLeft", "MultiBarRight",
   "MainMenuBarTexture0", "MainMenuBarLeftEndCap", "MainMenuBarRightEndCap", "ActionBarUpButton",
   "MainMenuBarBackpackButton", "CharacterBag0Slot", "CharacterBag1Slot", "KeyRingButton", "KeyRingButtonIconTexture", "CharacterReagentBag0Slot", "CharacterReagentBag0SlotIconTexture", "CharacterMicroButton", "SpellbookMicroButton", "MainMenuMicroButton",
@@ -545,6 +552,7 @@ env.Minimap_ZoomIn = function() ZOOM = ZOOM + 1 end
 env.Minimap_ZoomOut = function() ZOOM = ZOOM - 1 end
 -- As the game's: hooksecurefunc("Name", fn) or hooksecurefunc(object, "Method", fn) runs fn
 -- after the function it hooks, with the same arguments.
+env.issecurevariable = function() return true end   -- hooks on a frame's methods are safe on the stubbed client
 env.hooksecurefunc = function(a, b, c)
   local owner, name, fn
   if type(a) == "string" then owner, name, fn = env, a, b else owner, name, fn = a, b, c end
@@ -579,6 +587,9 @@ env.UnitAura = function(unit, i, filter)
       if filter:find("PLAYER", 1, true) then if i == 1 then return "Rend", 132155, 3, nil, 9, CLOCK + 5 end
       elseif i <= 3 then return "Debuff " .. i, 1, 1, nil, 0, 0 end
     elseif i == 1 then return "Enrage", 2, 1 end
+  elseif unit == "party1" then
+    if harmful then if i == 1 then return "Rend", 132155, 1, nil, 9, CLOCK + 5 end
+    elseif i == 1 then return "Power Word: Fortitude", 135987, 0, nil, 0, 0 end
   end
   return nil
 end
@@ -775,6 +786,14 @@ end
 env.UnitExists = function(unit)
   if unit == "target" or unit == "targettarget" then return TARGET_EXISTS end
   return true
+end
+-- The game's toggles for bars 2 to 8, as the WoW Forever client answers them (seven values).
+-- A toggle off hides the bar's frame, buttons and all.
+local TOGGLES = { true, true, true, true, true, true, true }
+env.GetActionBarToggles = function() return unpack(TOGGLES, 1, 7) end
+env.SetActionBarToggles = function(...)
+  for i = 1, 7 do TOGGLES[i] = select(i, ...) == true end
+  if env.MultiBarBottomLeft then env.MultiBarBottomLeft[TOGGLES[1] and "Show" or "Hide"](env.MultiBarBottomLeft) end
 end
 env._G = env
 setmetatable(env, { __index = function(t, k) return nil end })
@@ -1176,6 +1195,40 @@ click("MintCommunityToolsExportDungeonsButton")
 assert(ns.ui.status:GetText():find("lists no instances", 1, true), "a finder that lists nothing: said")
 env.GetLFGDungeonInfo = nil
 
+-- Scan the client's item cache: every cached id is filed like an item seen dropping (with
+-- no sighting of its own), a few thousand ids a frame, without asking the server. The client
+-- says which ids it has through C_Item.IsItemDataCachedByID; without that, nothing is asked.
+do
+  local before = select(2, ns.Loot.Counts())
+  local function tick() ns.Loot.scanFrame._scripts.OnUpdate(ns.Loot.scanFrame) end
+  if env.C_Item then
+    local CACHED = { [765] = true, [16800] = true, [18832] = true, [9799] = true, [23054] = true }
+    LOOT[23054] = { link = "|cffa335ee|Hitem:23054::::::::60:::::|h[Gressil, Dawn of Ruin]|h|r", info = { 4, 89, "Weapon", "One-Handed Swords", "INVTYPE_WEAPON", 135349 } }
+    local asked = 0
+    env.C_Item.IsItemDataCachedByID = function(id) asked = asked + 1; return CACHED[id] == true end
+    slash("cache")
+    assert(ns.Loot.Scanning() and ns.lootui.status:GetText():find("Scanning", 1, true), "the scan is under way, and says so: " .. ns.lootui.status:GetText())
+    assert(not ns.Loot.ScanCache(), "one scan at a time")
+    local steps = 0
+    while ns.Loot.Scanning() and steps < 100 do tick(); steps = steps + 1 end
+    assert(not ns.Loot.Scanning() and steps == 50, "walks the ids a step at a time: " .. steps)
+    assert(asked == ns.Loot.CACHE_IDS_MOST, "every id is asked of the client, none of the server: " .. asked)
+    local sword = env.MintCommunityToolsDB.items[23054]
+    assert(sword and sword.cached == true and sword.seen == 0 and sword.name == "Gressil, Dawn of Ruin" and sword.equipLoc == "INVTYPE_WEAPON", "a cached item never seen dropping is filed, with no sighting")
+    assert(env.MintCommunityToolsDB.items[18832].cached == nil and env.MintCommunityToolsDB.items[18832].seen > 0, "an item seen dropping keeps its sightings")
+    assert(env.MintCommunityToolsDB.items[9799] == nil, "a suffix item is left out, as ever")
+    assert(select(2, ns.Loot.Counts()) == before + 1, "one item more")
+    assert(ns.lootui.status:GetText():find("holds 4 items; 1 of them were new", 1, true), ns.lootui.status:GetText())
+    env.C_Item.IsItemDataCachedByID = nil
+    LOOT[23054] = nil
+    env.MintCommunityToolsDB.items[23054] = nil   -- the rest of the suite counts the items seen dropping
+    ns.LootUI.Refresh()
+  else
+    slash("cache")
+    assert(not ns.Loot.Scanning() and ns.lootui.status:GetText():find("cannot say which items it has cached", 1, true), "a client that cannot say: nothing scanned, said")
+  end
+end
+
 -- /mint uidump finder: the finder's answers, raw and in order, for reading a client whose
 -- order differs from the retail one.
 env.GetLFGDungeonInfo = function(id) local d = FINDER[id]; if d then return unpack(d, 1, 13) end return nil end
@@ -1380,6 +1433,155 @@ if S.enabled then
   local petf = frameNamed("MintCommunityToolsPetFrame")
   ov.petKept = env.PetFrame._parent == hider and petf._pointsBy.TOPLEFT[2] == mover("pet")
   ov.pet = { petf._shown, petf.healthText:GetText(), petf.auras }
+  -- The party: four small frames in a column on one box, the game's party window put away.
+  -- Out of the way in a raid. Off as a setting: the game's window is given back.
+  do
+    local holder = frameNamed("MintCommunityToolsPartyFrame")
+    local p1, p2, p4 = frameNamed("MintCommunityToolsParty1Frame"), frameNamed("MintCommunityToolsParty2Frame"), frameNamed("MintCommunityToolsParty4Frame")
+    local box = mover("party")
+    assert(holder._pointsBy.TOPLEFT[2] == box and p1._pointsBy.TOPLEFT[2] == holder and p2._pointsBy.TOPLEFT[2] == holder and p4._parent == holder, "the party frames hang in a column off one box")
+    local sh = S.units.partyHeight
+    assert(p1._pointsBy.TOPLEFT[5] == 0 and p2._pointsBy.TOPLEFT[5] == -(sh + 4) and p4._pointsBy.TOPLEFT[5] == -3 * (sh + 4), "one under the other, a gap between: " .. tostring(p2._pointsBy.TOPLEFT[5]))
+    assert(p1._size[1] == S.units.partyWidth and p1._size[2] == sh and box._size[2] == 4 * sh + 12 and box._size[1] == S.units.partyWidth, "a frame each at the party's size; the box is the column's size")
+    assert(S.units.partyWidth == 160 and S.units.partyHeight == 30, "the party's own size, 160x30 to start")
+    -- built like the player's frame: a portrait (flat or 3D as the portrait settings say),
+    -- the health as a percentage, aura rows on the sides the party's settings pick
+    assert(p1.portrait and p1.portrait._shown and p1.model and p1.model._shown == false, "a flat portrait, as the portrait settings say")
+    assert(p1.healthText:GetText():find("%%$"), "the health as a percentage: " .. tostring(p1.healthText:GetText()))
+    assert(S.units.party.buffs == "off" and S.units.party.debuffs == "right" and S.units.party.onlyMine == false, "debuffs to the right of a party frame, no buffs, to start")
+    fire("UNIT_AURA", "party1")
+    local deb, buf = p1.auras.debuffs, p1.auras.buffs
+    assert(deb.shown and deb.frame._point[1] == "TOPLEFT" and deb.frame._point[2] == p1 and deb.frame._point[3] == "TOPRIGHT", "the debuff row stands to the right of the frame")
+    assert(buf.shown == false, "and there is no buff row")
+    S.units.party.buffs = "below"
+    ns.Overhaul.Changed("units.party.buffs")
+    assert(buf.shown and buf.frame._point[1] == "TOPLEFT" and buf.frame._point[3] == "BOTTOMLEFT", "a buff row below, when asked for")
+    S.units.party.buffs = "off"
+    ns.Overhaul.Changed("units.party.buffs")
+    S.units.portrait3d = true
+    ns.Overhaul.Changed("units.portrait3d")
+    assert(p1.model._shown and p1.portrait._shown == false, "the 3D portrait setting reaches the party frames")
+    S.units.portrait3d = false
+    ns.Overhaul.Changed("units.portrait3d")
+    S.units.partyHeight = 40
+    ns.Overhaul.Changed("units.partyHeight")
+    assert(p1._size[2] == 40 and p2._pointsBy.TOPLEFT[5] == -44 and box._size[2] == 4 * 40 + 12, "the party's height resizes the frames, the column and the box")
+    S.units.partyHeight = 30
+    ns.Overhaul.Changed("units.partyHeight")
+    -- the switch from the first working copy was a plain true or false: it grows into the table
+    S.units.party = false
+    ns.Overhaul.Settings()
+    assert(type(S.units.party) == "table" and S.units.party.enabled == false and S.units.party.debuffs == "right", "an earlier boolean becomes the party's settings")
+    S.units.party.enabled = true
+    assert(box.text:GetText() == "Party frames", "the box is named")
+    assert(env.PartyFrame._parent == hider, "the game's party window is put away")
+    assert(p1.unit == "party1" and p1._shown and p1.name:GetText() ~= "", "a member frame follows its unit, and shows the member: " .. tostring(p1.name:GetText()))
+    assert(holder._shown, "shown, out of a raid")
+    env.IsInRaid = function() return true end
+    fire("GROUP_ROSTER_UPDATE")
+    assert(holder._shown == false, "in a raid the party frames step aside for the game's raid frames")
+    env.IsInRaid = nil
+    fire("GROUP_ROSTER_UPDATE")
+    assert(holder._shown, "and come back out of it")
+    S.units.party.enabled = false
+    ns.Overhaul.Changed("units.party.enabled")
+    assert(holder._shown == false and box.off == true and env.PartyFrame._parent == env.UIParent, "turned off: the frames and their box go, the game's window is given back")
+    S.units.party.enabled = true
+    ns.Overhaul.Changed("units.party.enabled")
+    assert(holder._shown and box.off == false and env.PartyFrame._parent == hider, "turned on again: the frames are back, the game's window put away")
+    -- Mint edit mode fills the party frames with sample members (and a debuff or two), so
+    -- they can be arranged without a party, in a raid too; the real party is back when it
+    -- closes, after combat when it closes in combat
+    do
+      local realName = p1.name:GetText()
+      env.IsInRaid = function() return true end
+      -- in combat the holder (parent of secure frames) is left as it is until combat ends
+      local inCombatG = env.InCombatLockdown
+      env.InCombatLockdown = function() return true end
+      fire("GROUP_ROSTER_UPDATE")
+      assert(holder._shown == true and ns.Units.pendingGroup == true, "in combat the party frames stay as they are")
+      env.InCombatLockdown = inCombatG
+      ns.Units.OnCombatEnd()
+      assert(holder._shown == false and ns.Units.pendingGroup == nil, "in a raid, out of the way, once combat ends")
+      ns.Overhaul.SetEdit(true)
+      assert(ns.Units.previewing == true and holder._shown and p1._shown and p4._shown, "edit mode: the frames show, raid or no raid")
+      assert(p1.name:GetText() == "Aldric Thornwood" and p2.name:GetText() == "Bryn Ashvale" and p4.name:GetText() == "Dara Flintlock", "sample members: " .. tostring(p1.name:GetText()))
+      assert(p1.health._value == 100 and p2.health._value == 72 and p2.healthText:GetText() == "72%", "with health of their own")
+      assert(p1.health._color[1] == 0.78 and p2.health._color[1] == 0.2, "in their class colour where the game has one, green otherwise")
+      assert(p1.portrait._texture == "Interface\\Icons\\INV_Misc_QuestionMark" and p1.portrait._shown, "a question mark for a portrait")
+      assert(p1.auras.debuffs.shown and p1.auras.debuffs.buttons[2]._shown and p1.auras.buffs.shown == false, "two sample debuffs on the side the settings say, no buff row (buffs are off)")
+      fire("UNIT_HEALTH", "party1")
+      fire("GROUP_ROSTER_UPDATE")
+      assert(p1.health._value == 100 and p1.name:GetText() == "Aldric Thornwood" and holder._shown, "the real party's events are let be while the samples show")
+      env.IsInRaid = nil
+      -- closing in combat: the samples stay until combat ends
+      local inCombat2 = env.InCombatLockdown
+      env.InCombatLockdown = function() return true end
+      ns.Overhaul.SetEdit(false)
+      assert(ns.Units.previewing == true and ns.Units.pendingPreview == false and p1.name:GetText() == "Aldric Thornwood", "in combat the samples stay until it ends")
+      env.InCombatLockdown = inCombat2
+      ns.Units.OnCombatEnd()
+      assert(ns.Units.previewing == false and ns.Units.pendingPreview == nil and p1.name:GetText() == realName and p1.auras.debuffs.buttons[2]._shown == false, "then the real party is back: " .. tostring(p1.name:GetText()))
+    end
+
+    -- Hooking a frame's method is asked of the client once: here it says yes. A client whose
+    -- secure code could not call a hooked method (the WoW Forever client) says no, and then
+    -- no method of a frame is hooked; each piece has its look once a second, or a script
+    -- hook, instead.
+    do
+      local O = ns.Overhaul
+      assert(O.ObjectHooksSafe() == true, "the stubbed client allows hooks on a frame's methods")
+      assert(O.OBJECT_HOOKS == false, "and yet none are made: the addon keeps its frames by looking at them")
+      local f = stub()
+      rawset(f, "Poke", function() end)
+      local poked = 0
+      assert(O.Hook(f, "Poke", function() poked = poked + 1 end) == false, "not hooked while hooks are off")
+      O.OBJECT_HOOKS = true
+      assert(O.Hook(f, "Poke", function() poked = poked + 1 end) == true, "hooked, where they are on")
+      f:Poke()
+      assert(poked == 1, "and the hook runs after the method")
+      O.OBJECT_HOOKS = false
+      assert(O.Hook(nil, "Poke", function() end) == false and O.Hook(f, "Poke", nil) == false, "nothing to hook: false")
+      -- a client that says no
+      local said = env.issecurevariable
+      env.issecurevariable = function() return false end
+      O.ResetHookProbe()
+      local g = stub()
+      rawset(g, "Poke", function() end)
+      local before = rawget(g, "Poke")
+      O.OBJECT_HOOKS = true
+      assert(O.ObjectHooksSafe() == false and O.Hook(g, "Poke", function() end) == false and rawget(g, "Poke") == before, "no hook on a client whose game could not call the method after")
+      O.OBJECT_HOOKS = false
+      env.issecurevariable = said
+      O.ResetHookProbe()
+      assert(O.ObjectHooksSafe() == true, "asked again, the stubbed client says yes")
+    end
+
+    -- The target's cast bar sits under the addon's target frame, which answers what the game
+    -- asks a cast bar's parent when the bar shows; the game then anchors the bar its own way,
+    -- and the addon puts it back under the frame right after. The combo points stay on the
+    -- screen, anchored to the frame.
+    do
+      local tf = frameNamed("MintCommunityToolsTargetFrame")
+      local cast = env.TargetFrameSpellBar
+      assert(cast._parent == tf and env.ComboFrame._parent == env.UIParent, "the cast bar under the addon's target frame, the combo points on the screen")
+      assert(tf:ShouldAnchorSpellBarToAuraContainer() == false, "the bar does not hang off aura rows")
+      local container = stub("TargetFrameAuraContainer")
+      rawset(env.TargetFrame, "GetAuraContainer", function() return container end)
+      assert(tf:GetAuraContainer() == container, "the aura container is the game's own target frame's")
+      rawset(env.TargetFrame, "GetAuraContainer", function() return nil end)   -- a client whose target frame has no container to give
+      assert(tf:GetAuraContainer() == tf and #tf:GetInheritableForbiddenAspects() == 0, "or the frame itself, with nothing forbidden, on a client without one")
+      rawset(env.TargetFrame, "GetAuraContainer", nil)
+      assert(cast._point[1] == "TOP" and cast._point[2] == tf and cast._point[3] == "BOTTOM", "under the frame")
+      -- the game anchors the bar its own way as it shows: put back right after, by a script
+      -- hook (safe on any client), not a hook on the method
+      cast:ClearAllPoints(); cast:SetPoint("TOPLEFT", env.TargetFrame, "BOTTOMLEFT", 0, -10)
+      assert(cast._point[2] == env.TargetFrame, "moved by the game")
+      assert(type(cast._hooks.OnShow) == "function", "an OnShow script hook on the bar")
+      cast._hooks.OnShow(cast)
+      assert(cast._point[2] == tf and cast._point[1] == "TOP", "put back under the addon's frame after the game moved it: " .. tostring(cast._point[2] and cast._point[2]._name))
+    end
+  end
   ov.chatTab = env.ChatFrame1Tab._alpha
   ov.bar1 = env.ActionButton1._point[2] == mover("bar1") and env.ActionButton12._point[4]
   ov.bar1Size = env.ActionButton1._size and env.ActionButton1._size[1]
@@ -1467,6 +1669,18 @@ if S.enabled then
     assert(strip(mw.localTime:GetText()) == "20:26 local" and strip(mw.gameTime:GetText()) == "20:30 game", "the two times")
     assert(same(under("localTime"), { true, "LEFT", -8 }) and same(under("gameTime"), { true, "RIGHT", -8 }), "share one row under the map")
     assert(size() == "180x" .. (180 + 17 + 17) and ({ ns.Map.Insets() })[2] == 17, "one row above, one below: " .. size())
+    -- the map's size: a stepper on the Minimap page, 100 to 400 by 10; the map, its box and
+    -- its border follow at once, the strips keep their height
+    do
+      local st = ns.settingsui.steppers["map.size"]
+      assert(st and st.least == 100 and st.most == 400 and st.step == 10, "the Minimap page has a size stepper with the map's limits")
+      assert(S.map.size == 180, "180 to start")
+      click("MintCommunityToolsSettingMore_map_size")
+      assert(S.map.size == 190 and env.Minimap._size[1] == 190 and env.Minimap._size[2] == 190, "a step larger: the map follows: " .. tostring(env.Minimap._size[1]))
+      assert(size() == "190x" .. (190 + 17 + 17), "and its box, the strips as tall as they were: " .. size())
+      click("MintCommunityToolsSettingLess_map_size")
+      assert(S.map.size == 180 and env.Minimap._size[1] == 180 and size() == "180x214", "and back")
+    end
     -- the clocks and the coordinates are redrawn twice a second, by a frame that is always there
     env.C_Map.GetPlayerMapPosition = function() return { x = 0.101, y = 0.202 } end
     mw.events._scripts.OnUpdate(mw.events, 0.3)
@@ -1639,7 +1853,7 @@ if S.enabled then
       flip(path, was)
       assert(ns.Overhaul.needsReload == false, path .. ": flipped back, no reload is wanted")
     end
-    assert(n == 32, "every switch was flipped: " .. n)
+    assert(n == 37, "every switch was flipped: " .. n)
     assert(tagged == 5 and ns.SettingsUI.RELOAD_TAG == "(turning off needs a reload)", "five switches are marked: " .. tagged)
     assert(sui.checks["bars.enabled"].label:GetText():find("|cff8c8c8c(turning off needs a reload)|r", 1, true), "the mark is dimmed, after the label")
     for _, piece in ipairs(ns.Overhaul.PIECES) do
@@ -1810,9 +2024,10 @@ if S.enabled then
       cf:SetPoint("BOTTOMLEFT", env.UIParent, "BOTTOMLEFT", 32, 95)
       assert(cf:GetNumPoints() == 3 and select(2, cf:GetPoint(1)) == mover("chat"), "the game's point is a third; the first still names the mover")
       assert(not O.Fastened(cf, two()), "which is not how the addon fastened it")
-      assert(C.sinceCheck >= 1, "anything fastening the window is looked at on the next frame, not a second later")
-      tick(0.01)
-      assert(cf:GetNumPoints() == 2 and O.Fastened(cf, two()), "back to the addon's two points and no others")
+      -- (no hook on the window's SetPoint: hooks on a frame's methods are off; the look
+      -- once a second finds it)
+      tick(1)
+      assert(cf:GetNumPoints() == 2 and O.Fastened(cf, two()), "back to the addon's two points and no others, at the look once a second")
       assert(C.sinceCheck < 1, "the addon's own placing does not ask for another look")
       local log = env.MintCommunityToolsDB.chatLog
       assert(type(log) == "table" and #log == 1, "what the game had done is written down")
@@ -1895,6 +2110,142 @@ if S.enabled then
       b:SetPoint(first[1] == "CENTER" and "BOTTOM" or "CENTER", env.UIParent, "CENTER", 0, 50)
       assert(b:GetNumPoints() == 2 and select(2, b:GetPoint(1)) == first[2], "a point added to a button: its first still names the bar's mover")
       assert(ns.Bars.Check() >= 1 and b:GetNumPoints() == 1 and ns.Bars.Check() == 0, "the bar is laid out again, and then there is nothing to do")
+    end
+
+    -- Each bar's own settings on the Bars page: shown, how many buttons, how many to a row.
+    -- Fewer to a row stacks the rest beneath; fewer buttons puts the rest away, and the look
+    -- once a second keeps them away; a hidden bar loses its box in edit mode.
+    do
+      local S = env.MintCommunityToolsDB.ui
+      local sui = ns.settingsui
+      local bar1 = mover("bar1")
+      local function at(i) local p = env["ActionButton" .. i]._point; return p[4] .. "," .. p[5] end
+      assert(sui.checks["bars.bar1.shown"] and sui.steppers["bars.bar1.buttons"] and sui.steppers["bars.bar1.perRow"], "a row for bar 1")
+      assert(sui.checks["bars.petbar.shown"] and not sui.checks["bars.bar3.shown"], "a row for each bar this client has, and none for one it has not")
+      assert(sui.steppers["bars.bar1.buttons"].least == 1 and sui.steppers["bars.bar1.buttons"].most == 12, "1 to 12 buttons")
+      assert(S.bars.bar1.shown == true and S.bars.bar1.buttons == 12 and S.bars.bar1.perRow == 12, "the whole bar in one row to start")
+      S.bars.bar1.perRow = 3
+      ns.Overhaul.Changed("bars.bar1.perRow")
+      assert(at(1) == "0,0" and at(3) == "68,0" and at(4) == "0,-34" and at(12) == "68,-102", "three to a row, four rows: " .. at(4) .. " " .. at(12))
+      assert(bar1._size[1] == 3 * 34 - 2 and bar1._size[2] == 4 * 34 - 2, "the box is three wide and four deep: " .. bar1._size[1] .. "x" .. bar1._size[2])
+      S.bars.bar1.buttons = 6
+      ns.Overhaul.Changed("bars.bar1.buttons")
+      -- put away means invisible and deaf to the mouse, never Hide(): the game shows and
+      -- hides its buttons as it likes, and would fight a hidden one
+      local function away(i) local b = env["ActionButton" .. i]; return rawget(b, "_alpha") == 0 and rawget(b, "_mouse") == false end
+      local function back(i) local b = env["ActionButton" .. i]; return (rawget(b, "_alpha") or 1) == 1 and rawget(b, "_mouse") ~= false end
+      assert(back(6) and away(7) and away(12), "six buttons: the rest are put away, not hidden")
+      assert(bar1._size[2] == 2 * 34 - 2, "two rows now")
+      env.ActionButton7:SetAlpha(1)
+      assert(ns.Bars.Check() == 1 and away(7) and ns.Bars.Check() == 0, "a button something made visible again is put away at the next look")
+      -- in combat too: alpha may be set then, the mouse is left as it is
+      local inCombat0 = env.InCombatLockdown
+      env.InCombatLockdown = function() return true end
+      env.ActionButton7:SetAlpha(1); env.ActionButton7:EnableMouse(true)
+      assert(ns.Bars.Check() == 1 and env.ActionButton7._alpha == 0 and env.ActionButton7._mouse == true, "in combat: invisible again, the mouse left for after")
+      env.InCombatLockdown = inCombat0
+      assert(ns.Bars.Check() == 1 and away(7), "after combat the mouse is taken away too")
+      S.bars.bar1.shown = false
+      ns.Overhaul.Changed("bars.bar1.shown")
+      assert(away(1) and away(6) and bar1.off == true and bar1._shown == false, "hidden: every button away, the box out of edit mode")
+      assert(ns.Bars.Check() == 0, "nothing to put back while it is hidden")
+      S.bars.bar1.shown = true
+      ns.Overhaul.Changed("bars.bar1.shown")
+      assert(back(1) and back(6) and away(7) and bar1.off == false and at(4) == "0,-34", "shown again as it was set: six buttons, three to a row")
+      -- /mint bars says what is set here and what the game is doing, for telling the two apart
+      do
+        local before = #out.prints
+        slash("bars")
+        local lines = {}
+        for i = before + 1, #out.prints do lines[#lines + 1] = out.prints[i] end
+        local text = table.concat(lines, " | ")
+        -- (the stubbed game never shows its bar frames or buttons: so the report says)
+        assert(text:find("Action bar 1: here shown, 6 buttons, 3 to a row; the game's toggle none, its bar frame HIDDEN; 0 of 12 buttons visible, 6 invisible, 6 deaf to the mouse, 6 put away here; box on.", 1, true), "bar 1 reported: " .. text)
+        assert(text:find("Action bar 2: here shown, 12 buttons, 12 to a row; the game's toggle on,", 1, true), "bar 2's toggle reported: " .. text)
+        local saved = env.MintCommunityToolsDB.barsReport
+        assert(type(saved) == "table" and #saved >= 3 and saved[1]:find("as set here", 1, true) and type(saved.at) == "number", "the report is kept in the save file too")
+        assert(text:find("Pet bar: here shown, 10 buttons, 10 to a row", 1, true) and not text:find("Action bar 3", 1, true), "every bar this client has, and no other")
+      end
+      -- in combat the change waits
+      local inCombat = env.InCombatLockdown
+      env.InCombatLockdown = function() return true end
+      S.bars.bar1.buttons, S.bars.bar1.perRow = 12, 12
+      ns.Overhaul.Changed("bars.bar1.buttons")
+      assert(away(7) and ns.Bars.pendingRelayout == true, "in combat the bar waits")
+      env.InCombatLockdown = inCombat
+      ns.Bars.OnCombatEnd()
+      assert(back(12) and at(12) == "374,0" and ns.Bars.pendingRelayout == nil and bar1._size[1] == 12 * 34 - 2, "and is laid out whole again when it ends")
+      -- A bar the game has a toggle for (bars 2 to 8 on this client): the addon's switch sets
+      -- the game's toggle, which hides the bar's frame, buttons and all; and a toggle flipped
+      -- in the game's own settings is adopted into the addon's switch at the next look
+      do
+        assert(TOGGLES[1] == true and S.bars.bar2.shown == true, "bar 2 is on, both sides")
+        S.bars.bar2.shown = false
+        ns.Overhaul.Changed("bars.bar2.shown")
+        assert(TOGGLES[1] == false and TOGGLES[2] == true and env.MultiBarBottomLeft._shown == false, "the switch sets the game's toggle for bar 2 and no other: the game hides the frame")
+        assert(mover("bar2").off == true, "and the box leaves edit mode")
+        S.bars.bar2.shown = true
+        ns.Overhaul.Changed("bars.bar2.shown")
+        assert(TOGGLES[1] == true and env.MultiBarBottomLeft._shown == true and mover("bar2").off == false, "and sets it back")
+        -- the game's own settings turn bar 2 off
+        env.SetActionBarToggles(false, true, true, true, true, true, true)
+        assert(ns.Bars.Check() >= 1 and S.bars.bar2.shown == false and mover("bar2").off == true, "the next look adopts the game's toggle into the addon's switch")
+        assert(ns.settingsui.checks["bars.bar2.shown"]._checked == false, "and the Bars page shows it")
+        env.SetActionBarToggles(true, true, true, true, true, true, true)
+        assert(ns.Bars.Check() >= 1 and S.bars.bar2.shown == true and mover("bar2").off == false, "and back")
+        -- a client whose toggles are laid out otherwise: the game does not read the call as
+        -- meant, so the game's setting is left as it was and the addon says so
+        local setToggles = env.SetActionBarToggles
+        env.SetActionBarToggles = function(...) TOGGLES[3] = select(1, ...) == true end   -- answers in some other order
+        local before = #out.prints
+        S.bars.bar2.shown = false
+        ns.Overhaul.Changed("bars.bar2.shown")
+        assert(TOGGLES[1] == true and TOGGLES[3] == true and out.prints[#out.prints]:find("did not take as expected", 1, true), "left as it was, and said: " .. tostring(out.prints[#out.prints]))
+        env.SetActionBarToggles = setToggles
+        S.bars.bar2.shown = true
+        ns.Overhaul.Changed("bars.bar2.shown")
+        ns.Bars.Check()
+        assert(TOGGLES[1] == true and S.bars.bar2.shown == true, "settled")
+        -- what the calls did is kept, the last few, for reading a client that behaves otherwise
+        local blog = env.MintCommunityToolsDB.barsLog
+        assert(type(blog) == "table" and #blog >= 3 and #blog <= ns.Bars.LOG_MOST, "a log of the toggle calls: " .. tostring(blog and #blog))
+        assert(blog[#blog - 1]:find("put back", 1, true) and blog[#blog]:find("bar2: toggle already on", 1, true), "saying what was set and what came of it: " .. blog[#blog - 1] .. " | " .. blog[#blog])
+        assert(blog[1]:find("bar2: set 0111111 %(ok%), toggles now 0111111, MultiActionBar_Update missing, frame hidden"), "the first call, in full: " .. blog[1])
+      end
+      -- the buttons' size and the gap between them: steppers on the Bars page; every bar
+      -- follows at once, the pet bar's buttons at four fifths, a macro's name as wide as its button
+      do
+        local st = sui.steppers["bars.size"]
+        assert(st and st.least == 20 and st.most == 64 and st.step == 2 and sui.steppers["bars.spacing"].most == 12, "button size 20 to 64 by 2, spacing 0 to 12")
+        assert(S.bars.size == 32 and S.bars.spacing == 2, "32px buttons 2 apart to start")
+        click("MintCommunityToolsSettingMore_bars_size")
+        assert(S.bars.size == 34 and env.ActionButton1._size[1] == 34 and env.ActionButton12._point[4] == 11 * 36 and bar1._size[1] == 12 * 36 - 2, "a step larger: the buttons, their places and the box follow: " .. tostring(env.ActionButton12._point[4]))
+        assert(env.PetActionButton1._size[1] == 27 and env.MultiBarBottomLeftButton12._point[4] == 11 * 36, "the pet bar's at four fifths; the other bars follow too")
+        assert(rawget(env.ActionButton1Name or {}, "_width") == nil or env.ActionButton1Name._width == 30, "a macro's name as wide as its button, less the border")
+        click("MintCommunityToolsSettingMore_bars_spacing")
+        assert(S.bars.spacing == 3 and env.ActionButton12._point[4] == 11 * 37, "a step more spacing: the buttons move apart")
+        -- in combat the change waits
+        local inCombat1 = env.InCombatLockdown
+        env.InCombatLockdown = function() return true end
+        click("MintCommunityToolsSettingLess_bars_size")
+        assert(S.bars.size == 32 and env.ActionButton1._size[1] == 34 and ns.Bars.pendingRelayout == true, "in combat the size waits")
+        env.InCombatLockdown = inCombat1
+        ns.Bars.OnCombatEnd()
+        assert(env.ActionButton1._size[1] == 32 and env.ActionButton12._point[4] == 11 * 35, "and is applied when it ends")
+        click("MintCommunityToolsSettingLess_bars_spacing")
+        assert(S.bars.spacing == 2 and env.ActionButton12._point[4] == 11 * 34, "and back")
+      end
+      -- the stepper walks it
+      click("MintCommunityToolsSettingLess_bars_bar1_perRow")
+      assert(S.bars.bar1.perRow == 11 and at(12) == "0,-34", "a step: eleven to a row, the twelfth beneath")
+      click("MintCommunityToolsSettingMore_bars_bar1_perRow")
+      assert(S.bars.bar1.perRow == 12 and at(12) == "374,0", "and back")
+      -- a save from before the bars had settings of their own: the whole bar, in one row
+      S.bars.bar2 = nil
+      ns.Overhaul.Changed("bars.bar2.buttons")
+      assert(env.MultiBarBottomLeftButton12._alpha ~= 0 and env.MultiBarBottomLeftButton12._point[4] == 374, "a bar without settings is whole, in one row")
+      ns.Overhaul.Settings()
+      assert(type(S.bars.bar2) == "table" and S.bars.bar2.buttons == 12, "and the settings fill in")
     end
 
     -- The Chat page: the window's width and height, and the size and font of its text.
@@ -2001,7 +2352,8 @@ if S.enabled then
       rawset(fillTex, "GetAtlas", function(self) return self._atlas or nil end)
       rawset(fillTex, "SetAtlas", function(self, a) rawset(self, "_atlas", a) end)
       rawset(sb, "GetStatusBarTexture", function() return fillTex end)
-      rawset(sb, "SetStatusBarTexture", function(self, t) rawset(self, "_barTexture", t); rawset(fillTex, "_atlas", false) end)
+      -- as the game: a picture by its atlas name shows as the fill's atlas; a file (the addon's plain one) clears it
+      rawset(sb, "SetStatusBarTexture", function(self, t) rawset(self, "_barTexture", t); rawset(fillTex, "_atlas", (type(t) == "string" and not t:find("\\", 1, true)) and t or false) end)
       rawset(sb, "GetStatusBarColor", function(self) return unpack(self._color) end)
       rawset(sb, "_color", { r, g, b, 1 })
       rawset(sb, "Background", art(1)); rawset(sb, "BackgroundEdge", art(1))
@@ -2042,28 +2394,34 @@ if S.enabled then
     assert(#minimize._made > 0, "the minimize button is a flat square")
     assert(sui.steppers["meter.fontSize"].text:GetText() == "Text size: 12" and sui.meterFont:GetText() == "Font: as the game has it", "the page shows what the game has")
 
-    -- the game fills a bar again: its own fill, colour and frame, each put right at once
+    -- the game fills a bar again: its own fill, colour and frame, each put right at the next
+    -- look (no hook on a frame's methods: the game's code could not call them after)
     a.StatusBar.fillTex._atlas = "UI-HUD-CoolDownManager-Bar"
     a.StatusBar:SetStatusBarTexture("UI-HUD-CoolDownManager-Bar")
-    assert(a.StatusBar._barTexture == WHITE, "the plain fill is back in the same breath")
     a.StatusBar:SetStatusBarColor(1, 0, 0, 1)
-    assert(colour(a) == "100,0,0", "a colour the game gives a bar is kept")
     a.StatusBar.Background:SetAlpha(0.8)
-    assert(a.StatusBar.Background._alpha == 0, "and its frame stays invisible when the game sets how see-through it is")
+    M.Check()
+    assert(a.StatusBar._barTexture == WHITE, "the plain fill is back at the next look")
+    assert(colour(a) == "100,0,0", "a colour the game gives a bar is kept")
+    assert(a.StatusBar.Background._alpha == 0, "and its frame is invisible again when the game sets how see-through it is")
     a.StatusBar.fillTex._atlas = "UI-HUD-CoolDownManager-Bar"   -- put back without a call the addon can see
     M.Check()
     assert(a.StatusBar._barTexture == WHITE and a.StatusBar.fillTex._atlas == false, "a fill put back unseen is caught by the next look")
-    -- a bar scrolling into view is dressed when the list updates
+    -- a bar scrolling into view is dressed at the next look (the list offers no callback
+    -- registry here, and its Update is not hooked)
     bars[3] = bar(0.1, 0.9, 0.1)
     box:Update()
-    assert(bars[3].StatusBar._barTexture == WHITE and bars[3].StatusBar.Background._alpha == 0, "a new bar is dressed as the list updates")
+    assert(bars[3].StatusBar._barTexture ~= WHITE, "not in the same breath")
+    M.Check()
+    assert(bars[3].StatusBar._barTexture == WHITE and bars[3].StatusBar.Background._alpha == 0, "a new bar is dressed at the next look")
 
     -- the settings, each at once
     local function step(path, dir) click("MintCommunityToolsSetting" .. (dir > 0 and "More_" or "Less_") .. path:gsub("%.", "_")) end
     flip("meter.oneColor", true)
     assert(colour(a) == "78,61,43" and colour(b) == "78,61,43", "every bar in your class colour: " .. colour(a))
     b.StatusBar:SetStatusBarColor(0.5, 0.5, 0.5, 1)
-    assert(colour(b) == "78,61,43", "also when the game colours one again")
+    M.Check()
+    assert(colour(b) == "78,61,43", "also when the game colours one again, at the next look")
     flip("meter.oneColor", false)
     assert(colour(a) == "100,0,0" and colour(b) == "50,50,50", "off again: the colours the game last gave them")
     step("meter.fontSize", 1)
@@ -2110,9 +2468,9 @@ if S.enabled then
       assert(box.label == "Damage meter" and box._size[1] == 400 and box._size[2] == 140 and box.off == false, "a Damage meter box, the meter's own size")
       assert(box._point[1] == "BOTTOMLEFT" and box._point[4] == 310 and box._point[5] == 420, "where the game had the meter: " .. tostring(box._point[1]) .. " " .. tostring(box._point[4]))
       assert(sys:GetNumPoints() == 1 and O.Fastened(sys, one()), "the meter is fastened to its box by one point")
-      -- the game places it again (its layout arriving): back on the box in the same breath
+      -- the game places it again (its layout arriving): back on the box at the next look
       sys:SetPoint("CENTER", env.UIParent, "CENTER", -250, 19)
-      assert(sys:GetNumPoints() == 1 and O.Fastened(sys, one()), "the game placed it: back on its box at once, with no point of the game's left on it")
+      assert(M.CheckPlace() == true and sys:GetNumPoints() == 1 and O.Fastened(sys, one()), "the game placed it: back on its box at the next look, with no point of the game's left on it")
       -- resized in the game's edit mode: the box follows at the next look
       SIZE[1], SIZE[2] = 300, 200
       assert(M.CheckPlace() == false and box._size[1] == 300 and box._size[2] == 200, "the box takes the meter's new size")
@@ -2156,47 +2514,48 @@ if S.enabled then
         assert(saved.meter ~= nil, "outside edit mode a right-click does nothing")
         saved.meter = nil
         ns.SettingsUI.ShowPage("general")
-        -- With the game's edit mode loaded, a right-click opens the GAME's box of settings
-        -- for the meter (style, sizes, text size...), not the addon's page; and when the box
-        -- closes, what was changed is saved into the game's own layout.
-        local dialog, manager = stub("EditModeSystemSettingsDialog"), stub("EditModeManagerFrame")
-        local attached, saves, CHANGED, LAYOUT = {}, 0, true, { layoutType = 1 }
-        rawset(dialog, "AttachToSystemFrame", function(_, f) attached[#attached + 1] = f end)
+        -- The box is a secure button: with the game's Edit Mode on this client, a right-click
+        -- runs the game's own /editmode (the game's doing, carrying none of the addon's
+        -- taint), and the addon only says where the meter's settings are. Nothing of the
+        -- game's edit mode is called from the addon: it had been, and the meter then could
+        -- not compare the secret numbers the server sends it.
+        assert(tostring(box._template):find("^SecureActionButtonTemplate") and rawget(box, "secure") == true, "the meter's box is a secure button: " .. tostring(box._template))
+        assert(rawget(box, "_attributes") == nil, "unarmed on a client without the game's Edit Mode")
+        local manager = stub("EditModeManagerFrame")
         rawset(manager, "IsShown", function() return false end)
-        rawset(manager, "IsEditModeActive", nil)
-        rawset(manager, "HasActiveChanges", function() return CHANGED end)
-        rawset(manager, "GetActiveLayoutInfo", function() return LAYOUT end)
-        rawset(manager, "SaveLayouts", function() saves = saves + 1 end)
-        env.EditModeSystemSettingsDialog, env.EditModeManagerFrame = dialog, manager
-        env.Enum = { EditModeLayoutType = { Preset = 0, Account = 1, Character = 2 } }
+        env.EditModeManagerFrame, env.SLASH_EDITMODE1 = manager, "/editmode"
         local function said(text) return out.prints[#out.prints]:find(text, 1, true) ~= nil end
-        O.SetEdit(true)
-        box._scripts.OnMouseUp(box, "RightButton")
-        assert(#attached == 1 and attached[1] == sys and sui.page == "general" and M.dialogOpen == true, "right-click: the game's box of settings is opened for the meter, the addon's page is not")
-        dialog._hooks.OnHide(dialog)
-        assert(saves == 1 and M.dialogOpen == false and said("saved in the game's layout"), "the box closes: what was changed is saved into the game's layout")
-        dialog._hooks.OnHide(dialog)
-        assert(saves == 1, "a box the addon did not open is not its to save")
-        CHANGED = false
-        assert(M.OnBoxMenu() == "game" and M.SaveGameSettings() == "clean" and saves == 1, "nothing changed: nothing saved")
-        CHANGED, LAYOUT = true, { layoutType = 0 }
-        assert(M.OnBoxMenu() == "game" and M.SaveGameSettings() == "preset" and saves == 1 and said("Modern and Classic layouts cannot be changed"), "the game's own layouts cannot be saved to: it says so")
-        LAYOUT = { layoutType = 2 }
-        -- not in combat, and not while the game's own edit mode is open (which opens it itself)
+        -- armed at the next look, not in combat
         local inCombat = env.InCombatLockdown
         env.InCombatLockdown = function() return true end
-        assert(M.OpenGameSettings() == false and #attached == 3 and said("out of combat"), "not in combat")
+        M.Check()
+        assert(rawget(box, "_attributes") == nil, "not armed in combat (a secure button's attributes are the game's then)")
         env.InCombatLockdown = inCombat
-        rawset(manager, "IsShown", function() return true end)
-        assert(M.OpenGameSettings() == false and #attached == 3, "nor while the game's own edit mode is open")
-        M.dialogOpen = true
-        assert(M.SaveGameSettings() == "editing" and saves == 1, "and that edit mode saves for itself")
-        rawset(manager, "IsShown", function() return false end)
-        -- a client without that box: the addon's page
-        env.EditModeSystemSettingsDialog = nil
-        assert(M.OnBoxMenu() == "addon" and sui.page == "meter", "no such box: the addon's Meter page instead")
+        M.Check()
+        local a = box._attributes
+        assert(a and a.type2 == "macro" and a.macrotext2 == "/editmode" and a["shift-type2"] == "none" and box.armed == true, "armed: a right-click runs the game's /editmode, Shift-right-click stays the addon's")
+        O.SetEdit(true)
+        box._scripts.OnMouseUp(box, "RightButton")
+        assert(said("click the damage meter there for its own settings") and sui.page == "general", "right-click: a word about where the settings are; the addon's page is not opened")
+        -- a secure box is the game's in combat: not sized, placed or shown then, but after
+        do
+          local sizedBefore = box._size
+          env.InCombatLockdown = function() return true end
+          O.Mover("meter", "Damage meter", 333, 77)
+          assert(box._size == sizedBefore and rawget(box, "pending")[1] == 333, "in combat the box keeps its size and remembers the one wanted")
+          O.HideMover("meter")
+          assert(box._shown ~= false and box.off == true, "nor is it hidden in combat")
+          env.InCombatLockdown = inCombat
+          O.OnCombatEnd()
+          assert(rawget(box, "pending") == nil and box._shown == false, "after combat: put away as asked")
+          O.Mover("meter", "Damage meter", 333, 77)
+          assert(box._size[1] == 333 and box._shown and box.off == false, "and sized and shown again on the next ask")
+        end
+        assert(M.OpenGameSettings == nil and M.SaveGameSettings == nil, "nothing of the game's edit mode is called from the addon any more")
+        -- a client without the game's Edit Mode: the addon's page
+        env.EditModeManagerFrame, env.SLASH_EDITMODE1 = nil, nil
+        assert(M.OnBoxMenu() == "addon" and sui.page == "meter", "no such edit mode: the addon's Meter page instead")
         O.SetEdit(false)
-        env.EditModeManagerFrame, env.Enum = nil, nil
         ns.SettingsUI.ShowPage("general")
       end
       -- switched off: its box leaves edit mode, and the meter is fastened as the game had it
@@ -2384,10 +2743,14 @@ if S.enabled then
   end
 
   -- A frame under the hidden parent may ask that parent to do something only its real parent
-  -- could: the hidden parent answers any method by doing nothing, and still has no fields.
+  -- could: the hidden parent has the methods it is known to be asked, doing nothing, as plain
+  -- fields, and keeps its own metatable (the game's secure code refuses a metatable of an
+  -- addon's, and then finds no method on the frame at all, GetHeight included).
   assert(hider._shown == false and hider:GetName() == "MintCommunityToolsHider", "the hidden parent keeps its own methods")
-  assert(type(hider.UpdateBarsShown) == "function" and hider:UpdateBarsShown() == nil and select("#", hider:AnythingAtAll(1, 2)) == 0,
-    "and answers a method it does not have by doing nothing")
+  assert(type(hider.UpdateBarsShown) == "function" and hider:UpdateBarsShown() == nil and rawget(hider, "UpdateBarsShown") ~= nil,
+    "and answers the method the status bars ask of their parent by doing nothing, as a field of its own")
+  assert(hider.AnythingAtAll == nil and type(getmetatable(hider).__index) == "table" and getmetatable(hider).__index.GetName ~= nil,
+    "no metatable of the addon's: an unknown name is nil, the real methods are where the game put them")
   assert(hider.isManagedFrame == nil and hider.layoutParent == nil and hider[1] == nil, "a field the game looks for is still not there")
 
   -- The game's experience bar holders stay with their manager: the game's own edit mode has
@@ -2670,6 +3033,12 @@ if S.enabled then
       MENU.holding(rowBtn, { rowBg, rowLit, rowIcon })
       MENU.holding(listTarget, {}, { rowBtn })
       MENU.holding(listBox, {}, { listTarget })
+      -- the list is told of its updates through its own callback registry, as the game's
+      -- lists offer: nothing on the list is replaced (its Update stays its own)
+      local listUpdate = function() end
+      rawset(listBox, "Update", listUpdate)
+      rawset(listBox, "Event", { OnUpdate = "OnUpdate" })
+      rawset(listBox, "RegisterCallback", function(self, event, fn, owner) rawset(self, "_callback", { event = event, fn = fn, owner = owner }) end)
       local bigCheck = MENU.typed(stub(), "CheckButton")
       rawset(bigCheck, "GetWidth", function() return 142 end)
       rawset(bigCheck, "GetHeight", function() return 93 end)
@@ -2684,6 +3053,26 @@ if S.enabled then
       assert(M.windows.CommunitiesFrame.error == nil, "the guild window is dressed without an error: " .. tostring(M.windows.CommunitiesFrame.error))
       assert(M.dressed[rowBtn] and rowBg._alpha == 0 and rowLit._alpha == 0 and rawget(rowIcon, "_alpha") == nil, "a list row loses the picture behind it and what lights up on it, and keeps its icon")
       assert(M.dressed[bigCheck] and bigBg._alpha == 0 and bigRing._alpha == 0 and rawget(bigTick, "_texture") == nil, "a card that is a large CheckButton is a card, not a check box: no tick is drawn on it")
+      local cb = rawget(listBox, "_callback")
+      assert(cb and cb.event == "OnUpdate" and type(cb.fn) == "function" and rawget(listBox, "Update") == listUpdate, "told of updates through the registry; the list's Update is left as it was")
+      -- a row made later is dressed when the list says it has updated
+      local lateRow, lateBg = MENU.typed(stub(), "Button"), MENU.art()
+      rawset(lateRow, "Background", lateBg); rawset(lateRow, "Icon", MENU.art())
+      rawset(lateRow, "GetParent", function() return listTarget end)
+      MENU.holding(lateRow, { lateBg })
+      MENU.holding(listTarget, {}, { rowBtn, lateRow })
+      cb.fn()
+      assert(M.dressed[lateRow] and lateBg._alpha == 0, "a row that came with an update is dressed then")
+      -- a list without a registry (an older client's): its Update is hooked instead
+      local plainBox = MENU.typed(stub(), "Frame")
+      local plainUpdate = function() end
+      rawset(plainBox, "Update", plainUpdate)
+      local how = M.AfterScrollUpdate(plainBox, function() end)
+      assert(how == false and rawget(plainBox, "Update") == plainUpdate, "a list that offers no registry is left alone (hooks on a frame's methods are off): " .. tostring(how))
+      ns.Overhaul.OBJECT_HOOKS = true
+      assert(M.AfterScrollUpdate(plainBox, function() end) == "hook", "hooked, where hooks are on")
+      ns.Overhaul.OBJECT_HOOKS = false
+      assert(M.AfterScrollUpdate(nil, function() end) == false, "and nothing for nothing")
       env.CommunitiesFrame = nil
       end
       -- the spellbook (a fourth record): page art, tabs with a picture, entries on backplates,
@@ -2696,17 +3085,27 @@ if S.enabled then
       local bookTab = MENU.typed(stub(), "Button")
       local tabSquare, tabPic, tabActive = atlasArt("spellbook-Tab-Frame-C60"), MENU.art(), atlasArt("spellbook-Tab-Frame-Glow-C60")
       rawset(bookTab, "Icon", tabPic); rawset(bookTab, "SquareBackground", tabSquare); rawset(bookTab, "SquareBackgroundActive", tabActive)
-      MENU.holding(bookTab, { tabSquare, tabPic, tabActive })
+      -- as on the client: the ordinary tab art is there too, hidden, which would make it a push button
+      local tabLeft, tabMid, tabRight = atlasArt("uiframe-tab-left"), atlasArt("_uiframe-tab-center"), atlasArt("uiframe-tab-right")
+      rawset(bookTab, "Left", tabLeft); rawset(bookTab, "Middle", tabMid); rawset(bookTab, "Right", tabRight)
+      MENU.holding(bookTab, { tabSquare, tabPic, tabActive, tabLeft, tabMid, tabRight })
       local entry = MENU.typed(stub(), "Frame")
       local plate, spellBtn = atlasArt("spellbook-item-backplate"), MENU.typed(stub(), "Button")
       local spellBorder = atlasArt("spellbook-item-iconframe")
       rawset(spellBtn, "Border", spellBorder); rawset(spellBtn, "Icon", MENU.art())
       MENU.holding(spellBtn, { spellBorder })
       rawset(entry, "Backplate", plate); rawset(entry, "Button", spellBtn)
-      MENU.holding(entry, { plate }, { spellBtn })
+      -- its words, drawn dark for the parchment: the name; the kind in grey; a level in red
+      local words = MENU.typed(stub(), "Frame")
+      local nameFS, kindFS, levelFS = stub(), stub(), stub()
+      nameFS:SetTextColor(0.1, 0.07, 0.03, 1); kindFS:SetTextColor(0.5, 0.5, 0.5, 1); levelFS:SetTextColor(1, 0.1, 0.1, 1)
+      rawset(words, "Name", nameFS); rawset(words, "SubName", kindFS); rawset(words, "RequiredLevel", levelFS)
+      rawset(entry, "TextContainer", words)
+      MENU.holding(entry, { plate }, { spellBtn, words })
       local heading = MENU.typed(stub(), "Frame")
       local headPlate, divider = atlasArt("spellbook-list-backplate"), atlasArt("spellbook-divider")
-      rawset(heading, "Backplate", headPlate); rawset(heading, "Border", divider)
+      local headFS = stub(); headFS:SetTextColor(0.12, 0.08, 0.04, 1)
+      rawset(heading, "Backplate", headPlate); rawset(heading, "Border", divider); rawset(heading, "Text", headFS)
       MENU.holding(heading, { headPlate, divider })
       local paged, controls = MENU.typed(stub(), "Frame"), MENU.typed(stub(), "Frame")
       local prevBtn = MENU.holding(MENU.typed(stub(), "Button"), { MENU.art() })
@@ -2729,8 +3128,16 @@ if S.enabled then
       assert(M.windows.PlayerSpellsFrame and M.windows.PlayerSpellsFrame.error == nil, "the spellbook is dressed without an error: " .. tostring(M.windows.PlayerSpellsFrame and M.windows.PlayerSpellsFrame.error))
       assert(pageArt._alpha == 0 and talentsArt._alpha == 0, "the page art is gone, the talents page's too, hidden or not")
       assert(M.dressed[bookTab] and tabSquare._alpha == 0 and rawget(tabPic, "_alpha") == nil and tabActive._texture == "Interface\\Buttons\\WHITE8X8", "a tab with a picture is a flat square with it, the open one washed in the accent colour")
+      assert(tabLeft._alpha == 0 and tabMid._alpha == 0 and rawget(tabPic, "_alpha") == nil, "the ordinary tab art it carries goes, and it is not taken for a push button: the picture stays")
       assert(plate._alpha == 0 and rawget(spellBorder, "_alpha") == nil, "an entry loses its backplate and keeps its spell button's frame")
       assert(headPlate._alpha == 0 and divider._alpha == 0, "a heading loses its backplate and its divider")
+      local light = ns.W.COLOR.text
+      assert(nameFS._textColor[1] == light[1] and headFS._textColor[1] == light[1], "dark words on the page are made light for the panel")
+      assert(kindFS._textColor[1] == 0.5 and levelFS._textColor[1] == 1, "grey and red words keep their colour: the game means something by it")
+      M.SetOff("menus", true)
+      assert(nameFS._textColor[1] == 0.1 and headFS._textColor[1] == 0.12, "switched off, the words are dark again")
+      M.SetOff("menus", false)
+      M.DressAll()
       assert(M.dressed[prevBtn] and M.dressed[minBtn], "the page arrow and the minimize button are flat squares with a mark")
       -- the page fills itself again while the window stays open (sorted, turned): a row that
       -- appears then is dressed within a couple of seconds, by the look the piece takes at
@@ -2797,7 +3204,13 @@ if S.enabled then
       MENU.holding(box, { boxArt }, { first, second })
       assert(not M.dressed[second], "a control it makes later is not dressed yet")
       box:UpdateSettings()
-      assert(M.dressed[second] and secondArt._alpha == 0, "it is, as soon as the box has filled itself again")
+      assert(not M.dressed[second], "nor as the box fills itself again (no hook on its methods)")
+      -- while it is shown it is dressed again every so often, like the game's own windows
+      rawset(box, "_shown", true)
+      local tick = M.events._scripts.OnUpdate
+      tick(M.events, 2.1)
+      assert(M.dressed[second] and secondArt._alpha == 0, "it is, at the next look while the box is shown")
+      rawset(box, "_shown", false)
       env.EditModeSystemSettingsDialog = nil
     end
   end
@@ -2820,26 +3233,43 @@ if S.enabled then
     assert(d and d.inset == -1 and #d.edges == 4, "a flat background and a border just outside the bar")
     assert(CAST.text._pointsBy.CENTER[2] == bar and rawget(CAST.text, "_alpha") == nil, "the spell's name sits on the bar")
     assert(bar._barTexture == WHITE and fill() == "78,61,43", "the fill is a plain colour: your class colour for a cast: " .. fill())
-    -- the game sets the fill's picture again for each thing the bar does: the plain fill goes back, in that thing's colour
+    -- the game sets the fill's picture again for each thing the bar does: the plain fill goes
+    -- back, in that thing's colour, at the next frame the bar is shown (its OnUpdate: one look
+    -- at the fill's atlas; no hook on the method, which the game's code could not call after)
+    local fillTex = stub()
+    rawset(bar, "GetStatusBarTexture", function() return fillTex end)
+    rawset(fillTex, "GetAtlas", function() local t = bar._barTexture; return t ~= WHITE and t or nil end)
+    local function gameFills(atlas) bar:SetStatusBarTexture(atlas); bar._hooks.OnUpdate(bar) end
     rawset(bar, "barType", "channel")
-    bar:SetStatusBarTexture("ui-castingbar-filling-channel")
+    gameFills("ui-castingbar-filling-channel")
     assert(bar._barTexture == WHITE and fill() == "30,80,35", "a channel is green: " .. fill())
     rawset(bar, "barType", "interrupted")
-    bar:SetStatusBarTexture("ui-castingbar-interrupted")
+    gameFills("ui-castingbar-interrupted")
     assert(bar._barTexture == WHITE and fill() == "85,25,25", "an interrupted cast is red")
     rawset(bar, "barType", "uninterruptable")
-    bar:SetStatusBarTexture("ui-castingbar-uninterruptable")
+    gameFills("ui-castingbar-uninterruptable")
     assert(fill() == "60,60,60", "one that cannot be interrupted is grey")
     rawset(bar, "barType", "standard")
-    bar:SetStatusBarTexture("ui-castingbar-filling-standard")
+    gameFills("ui-castingbar-filling-standard")
     assert(fill() == "78,61,43", "and a cast again")
+    -- what the game says the bar is doing may be a secret (the target's bar): a plain cast then
+    if VARIANT == "mainline" then
+      rawset(bar, "barType", secret("channel"))
+      gameFills("ui-castingbar-filling-channel")
+      assert(fill() == "78,61,43", "a secret kind is taken for a plain cast: " .. fill())
+      rawset(bar, "barType", "standard")
+    end
+    bar._hooks.OnUpdate(bar)
+    assert(bar._barTexture == WHITE, "and nothing to do while the fill is the addon's")
     -- on its mover, and back on it the moment the game places it
     local box = mover("castbar")
     local function onBox() return bar._point[1] == "CENTER" and bar._point[2] == box end
     assert(onBox() and box.label == "Cast bar" and box._size[1] == 208 and box._size[2] == 17, "the player's cast bar sits on its own box")
     bar:SetPoint("BOTTOM", env.UIParent, "BOTTOM", 0, 120)
-    assert(onBox(), "the game placed it: back on its box in the same breath")
+    C.events._scripts.OnUpdate(C.events, 1.1)
+    assert(onBox(), "the game placed it: back on its box at the look once a second")
     bar:SetPoint("BOTTOM", 0, 120)
+    C.events._scripts.OnUpdate(C.events, 1.1)
     assert(onBox(), "whichever way the game says where")
     -- left to the game's own edit mode while that is open; back afterwards
     local manager = stub("EditModeManagerFrame")
@@ -2942,7 +3372,9 @@ if S.enabled then
       MENU.holding(rowCard, { cardBg, stroke, tag }, { slot })
       MENU.holding(loot, { lootArt }, { take, more, rowCard })
       loot:Open()
-      assert(M.dressed[more] and moreArt._alpha == 0, "what it holds is dressed again each time it fills itself")
+      assert(not M.dressed[more], "not as it fills itself (no hook on its methods)")
+      fire("LOOT_OPENED"); B.events._scripts.OnUpdate(B.events, 0.2)   -- the game tells of the loot: dressed a moment later
+      assert(M.dressed[more] and moreArt._alpha == 0, "what it holds is dressed again as the game tells of the loot")
       assert(M.dressed[rowCard] and cardBg._alpha == 0 and stroke._alpha == 0 and tag._alpha == 0, "a loot row loses its card, stroke and rarity tag")
       assert(M.dressed[slot] and (rawget(slotIcon, "_alpha") or 1) == 1, "and the item's slot in it is flat, its picture shown: " .. tostring(rawget(slotIcon, "_alpha")))
       assert(B.count == 1 and B.Check() == false, "it is not one of the bag windows: the bag window's box is not for it")
@@ -2994,9 +3426,19 @@ if S.enabled then
     -- an atlas: trimming would cut a piece out of the sheet it is on)
     local untrimmed = rawget(BAG.emptyIcon, "_texCoord") == nil or BAG.emptyIcon._texCoord[1] == 0   -- (0 after the piece was switched off and on above)
     assert(BAG.emptyIcon._alpha == 0 and untrimmed, "an empty slot is the plain square: its slot art is invisible, and not trimmed")
+    -- (the game tells of a change to the bags; the window is dressed again a moment later:
+    -- no hook on the slot's methods)
+    local function bagsChanged()
+      local shown = BAG.SHOWN
+      BAG.SHOWN = true   -- a change to the bags comes with the window open; a closed one is left (tested below)
+      fire("BAG_UPDATE_DELAYED"); B.events._scripts.OnUpdate(B.events, 0.2)
+      BAG.SHOWN = shown
+    end
     BAG.emptyIcon:SetTexture(134414)
+    bagsChanged()
     assert(BAG.emptyIcon._alpha == 1 and BAG.emptyIcon._texCoord[1] == 0.08, "an item arrives: its picture shows, trimmed")
     BAG.emptyIcon:SetAtlas("bags-item-slot64")
+    bagsChanged()
     assert(BAG.emptyIcon._alpha == 0, "it goes: the slot art is invisible again")
     -- the bag's menu, where the portrait was, and the sort button
     assert(M.dressed[BAG.menu] and M.dressed[BAG.menu].inset == 10 and M.dressed[BAG.menu].mark:GetText() == "v" and BAG.menuArt._alpha == 0,
@@ -3004,11 +3446,15 @@ if S.enabled then
     assert(M.dressed[BAG.sort] and M.dressed[BAG.sort].mark:GetText() == "Sort" and BAG.sortArt._alpha == 0, "the sort button is a flat square that says Sort")
     assert(edge(BAG.epic) == "64,21,93", "the slot's border is the colour of the item's quality: " .. edge(BAG.epic))
     assert(edge(BAG.empty) == "0,0,0", "an empty slot's border is plain")
-    -- the game shows and colours the frame when an item arrives, hides it when it goes
+    -- the game shows and colours the frame when an item arrives, hides it when it goes: the
+    -- border follows at the window's next dressing (the game tells of the change; no hook
+    -- on the frame's methods)
     BAG.emptyBorder:Show()
     BAG.emptyBorder:SetVertexColor(0.1, 0.5, 1)
+    bagsChanged()
     assert(edge(BAG.empty) == "10,50,100", "an item arrives: the border takes its quality's colour")
     BAG.emptyBorder:Hide()
+    bagsChanged()
     assert(edge(BAG.empty) == "0,0,0", "it goes: plain again")
     -- the coin box and the search box
     assert(M.dressed[BAG.money] and BAG.coinArt._alpha == 0 and M.dressed[BAG.search] and BAG.searchArt._alpha == 0, "the coin box and the search box are flat")
@@ -3017,7 +3463,9 @@ if S.enabled then
     local late = BAG.slot({ 0, 0.44, 0.87 })
     BAG.children[#BAG.children + 1] = late
     BAG.frame:UpdateItems()
-    assert(M.dressed[late] and edge(late) == "0,44,87", "a slot made later is dressed when the items are laid out")
+    assert(not M.dressed[late], "not as the game lays the items out (no hook on its methods)")
+    bagsChanged()
+    assert(M.dressed[late] and edge(late) == "0,44,87", "a slot made later is dressed as the game tells of the change")
     -- the bags change while the window is open: once, a moment later; a closed window is left
     local later = BAG.slot(nil)
     BAG.children[#BAG.children + 1] = later
@@ -3328,6 +3776,34 @@ end
 slash("uidump bags")
 assert(env.MintCommunityToolsDB.uiDump.group == "bags" and env.MintCommunityToolsDB.uiDump.frames.ContainerFrameCombinedBags and env.MintCommunityToolsDB.uiDump.frames.GameMenuFrame == nil,
   "/mint uidump bags records the bag windows, and only those")
+-- /mint uidump top: every shown frame hanging straight off the screen, by walking them all
+do
+  local onScreen, hidden, nameless = stub("SomethingOnScreen"), stub("SomethingHidden"), stub()
+  env.SomethingOnScreen, env.SomethingHidden = onScreen, hidden   -- named frames are globals, as in the game
+  for _, f in ipairs({ onScreen, hidden, nameless }) do rawset(f, "_parent", env.UIParent); rawset(f, "GetObjectType", function() return "Frame" end) end
+  rawset(onScreen, "_shown", true); rawset(hidden, "_shown", false); rawset(nameless, "_shown", true)
+  local at = {}
+  for i, f in ipairs(out.frames) do at[f] = i end
+  env.EnumerateFrames = function(prev)
+    if prev == nil then return out.frames[1] end
+    return at[prev] and out.frames[at[prev] + 1] or nil
+  end
+  slash("uidump top")
+  local d = env.MintCommunityToolsDB.uiDump
+  assert(d.group == "top" and d.frames.SomethingOnScreen and d.frames.SomethingHidden == nil, "what is shown and hangs off the screen is recorded; a hidden frame is not")
+  assert(d.frames.MintCommunityToolsHider == nil and d.frames.GameMenuFrame == nil, "the addon's own frames are left out, and so is a frame that hangs off something else")
+  env.EnumerateFrames = nil
+  slash("uidump top")
+  assert(out.prints[#out.prints]:find("does not let an addon walk its frames", 1, true), "a client without EnumerateFrames says so")
+  env.SomethingOnScreen, env.SomethingHidden = nil, nil
+end
+slash("uidump bars")
+do
+  local d = env.MintCommunityToolsDB.uiDump
+  assert(d.group == "bars" and d.frames.ActionButton1 and d.frames.GameMenuFrame == nil, "/mint uidump bars records the action bars, and only those")
+  assert(type(d.bars) == "table" and d.bars.error == nil and type(d.bars.toggles) == "table" and type(d.bars.cvars) == "table" and d.bars.frames.MultiBarBottomLeft and type(d.bars.editMode.api) == "table",
+    "and how the game keeps their visibility: " .. tostring(d.bars and d.bars.error))
+end
 -- Something that is not worn has no equip location in the export, whatever this client calls
 -- "not worn"; an item seen by an earlier version, token and all, is cleaned on the way out.
 do

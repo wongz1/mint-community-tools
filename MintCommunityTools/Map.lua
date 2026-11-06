@@ -47,6 +47,9 @@ local HIDE = {
     "MinimapNorthTag", "MiniMapTrackingButtonBorder", "MiniMapTrackingBorder", "MiniMapMailBorder",
 }
 
+-- What the size may be: { least, most, step }. The Settings tab's stepper uses this.
+Map.LIMITS = { size = { 100, 400, 10 } }
+
 local function settings()
     return ns.Overhaul.Settings().map
 end

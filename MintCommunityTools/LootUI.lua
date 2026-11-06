@@ -302,14 +302,17 @@ function LootUI.Build(panel, frame)
     lui.prev:SetPoint("RIGHT", lui.next, "LEFT", -2, 0)
     y = y - BUTTON_H - GAP
 
-    lui.watch = W.button(panel, "MintCommunityToolsLootWatchButton", "Show loot watcher", 130, function() LootUI.ToggleWatch() end)
+    lui.watch = W.button(panel, "MintCommunityToolsLootWatchButton", "Show loot watcher", 112, function() LootUI.ToggleWatch() end)
     lui.watch:SetPoint("TOPLEFT", PAD, y)
-    lui.exportNew = W.button(panel, "MintCommunityToolsLootExportButton", "Export new items", 120, function() exportItems(false) end)
+    lui.exportNew = W.button(panel, "MintCommunityToolsLootExportButton", "Export new items", 112, function() exportItems(false) end)
     lui.exportNew:SetPoint("LEFT", lui.watch, "RIGHT", GAP, 0)
-    lui.exportAll = W.button(panel, "MintCommunityToolsLootExportAllButton", "Export all", 80, function() exportItems(true) end)
+    lui.exportAll = W.button(panel, "MintCommunityToolsLootExportAllButton", "Export all", 72, function() exportItems(true) end)
     lui.exportAll:SetPoint("LEFT", lui.exportNew, "RIGHT", GAP, 0)
-    lui.clear = W.button(panel, "MintCommunityToolsLootClearButton", "Clear", 56, confirmClear)
-    lui.clear:SetPoint("LEFT", lui.exportAll, "RIGHT", GAP, 0)
+    -- every item the client has cached, filed for the next export
+    lui.scan = W.button(panel, "MintCommunityToolsLootScanButton", "Scan cache", 76, function() LootUI.ScanCache() end)
+    lui.scan:SetPoint("LEFT", lui.exportAll, "RIGHT", GAP, 0)
+    lui.clear = W.button(panel, "MintCommunityToolsLootClearButton", "Clear", 50, confirmClear)
+    lui.clear:SetPoint("LEFT", lui.scan, "RIGHT", GAP, 0)
     y = y - BUTTON_H - GAP
 
     lui.hint = W.dim(panel, "", CW)
@@ -496,4 +499,22 @@ end
 function LootUI.ExportItems(all)
     ns.UI.Show("loot")
     exportItems(all)
+end
+
+-- Scans the client's item cache into the items seen (the Loot tab shows how far it is), so
+-- that Export new items carries everything the client knows to the website.
+function LootUI.ScanCache()
+    ns.UI.Show("loot")
+    local ok, why = ns.Loot.ScanCache(function(state, done)
+        if not done then
+            setStatus(sformat("Scanning the client's item cache: %s of %s ids, %s items so far.", W.commas(state.id - 1), W.commas(ns.Loot.CACHE_IDS_MOST), W.commas(state.found)))
+            return
+        end
+        local pending = ns.Loot.PendingCount()
+        setStatus(sformat("The client's cache holds %s items; %s of them were new here. Export new items sends the %s the website has not had.",
+            W.commas(state.found), W.commas(state.new), W.commas(pending)))
+        LootUI.Refresh()
+    end)
+    if not ok then setStatus(why, true) else setStatus("Scanning the client's item cache...") end
+    return ok
 end

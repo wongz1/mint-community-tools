@@ -52,7 +52,14 @@ O.DEFAULTS = {
     enabled = false,
     menuEdit = true,     -- the game menu's Edit Mode button opens this UI's edit mode
     menuButton = true,   -- a Mint Edit Mode button at the bottom of the game menu
-    bars = { enabled = true, size = 32, spacing = 2, hideMicro = false, hideBags = true, extraBags = true, xpClassColor = true, xpWidth = 0, xpHeight = 0 },
+    bars = { enabled = true, size = 32, spacing = 2, hideMicro = false, hideBags = true, extraBags = true, xpClassColor = true, xpWidth = 0, xpHeight = 0,
+             -- each bar: shown at all, how many of its buttons, and how many to a row (a
+             -- column, for the two upright bars); fewer to a row stacks the rest under
+             bar1 = { shown = true, buttons = 12, perRow = 12 }, bar2 = { shown = true, buttons = 12, perRow = 12 },
+             bar3 = { shown = true, buttons = 12, perRow = 12 }, bar4 = { shown = true, buttons = 12, perRow = 12 },
+             bar5 = { shown = true, buttons = 12, perRow = 12 }, bar6 = { shown = true, buttons = 12, perRow = 12 },
+             bar7 = { shown = true, buttons = 12, perRow = 12 }, bar8 = { shown = true, buttons = 12, perRow = 12 },
+             petbar = { shown = true, buttons = 10, perRow = 10 }, stancebar = { shown = true, buttons = 10, perRow = 10 } },
     -- fontSize 0 and font "default" mean: as the game has them
     chat = { enabled = true, background = true, width = 400, height = 180, fontSize = 0, font = "default" },
     units = {
@@ -61,6 +68,9 @@ O.DEFAULTS = {
         buffSize = 20, debuffSize = 20, perRow = 8, buffTimers = true, debuffTimers = true,
         player = { buffs = "off", debuffs = "above", onlyMine = false },
         target = { buffs = "above", debuffs = "above", onlyMine = false },
+        -- the party frames: their own aura rows and size; portraits and fonts as above
+        party = { enabled = true, buffs = "off", debuffs = "right", onlyMine = false },
+        partyWidth = 160, partyHeight = 30,
     },
     map = { enabled = true, square = true, size = 180, zone = true, coords = true, localTime = true, gameTime = true },
     quests = { enabled = true, levels = true, background = false, collapsed = false, width = 250, maxHeight = 420, tab = "all" },
@@ -103,6 +113,8 @@ function O.Settings()
         if units.debuffSize == nil then units.debuffSize = units.auraSize end
         units.auraSize = nil
     end
+    -- The party frames' switch grew into their settings.
+    if type(units) == "table" and type(units.party) == "boolean" then units.party = { enabled = units.party } end
     fill(db.ui, O.DEFAULTS)
     return db.ui
 end
@@ -186,23 +198,61 @@ O.hider = hider
 
 -- Some of the game's frames ask their parent to do things ("parent:UpdateBarsShown()"), and
 -- a frame moved under the hider would be asking the hider, which has no such method: a Lua
--- error in the game's own code. So the hider answers any method it does not have by doing
--- nothing. Only names that start with a capital, as methods do: a field the game looks for
--- ("isManagedFrame") is still not there.
-pcall(function()
-    local mt = getmetatable(hider)
-    local methods = mt and mt.__index
-    if type(methods) ~= "table" then return end
-    local function nothing() end
-    setmetatable(hider, {
-        __index = function(_, key)
-            local v = methods[key]
-            if v ~= nil then return v end
-            if type(key) == "string" and key:find("^%u") then return nothing end
-            return nil
-        end,
-    })
-end)
+-- error in the game's own code. So the hider has those methods, doing nothing. They are
+-- plain fields, by name. NOT a metatable of the addon's own answering any name: the game's
+-- secure code refuses to run a function of an addon's reached through a metatable, and then
+-- finds nothing on the frame at all, its real methods included (the hidden objective
+-- tracker asking its parent's GetHeight, and an error in the game's code).
+local function nothing() end
+O.HIDER_ANSWERS = { "UpdateBarsShown" }
+for _, name in ipairs(O.HIDER_ANSWERS) do rawset(hider, name, nothing) end
+
+---------------------------------------------------------------------------
+-- Hooking the game's frames
+---------------------------------------------------------------------------
+
+-- hooksecurefunc on a METHOD OF A FRAME (a bar's SetStatusBarTexture, a list's Update) is
+-- not safe on every client. On the WoW Forever client the game's own secure code, calling
+-- that method afterwards, finds nothing there at all: "attempt to call a nil value" in the
+-- game's code, at every cast, every list update. (A hook on a global function is another
+-- thing, and fine.) So the client is asked once, with a frame made for the purpose: hooked,
+-- is the method still a secure value? Where it is not, no method of a frame is hooked, and
+-- each piece falls back on its periodic look or on a script hook, which is safe everywhere.
+local hooksSafe
+function O.ObjectHooksSafe()
+    if hooksSafe ~= nil then return hooksSafe end
+    hooksSafe = false
+    if type(hooksecurefunc) ~= "function" then return false end
+    local probe = CreateFrame("Frame")
+    if type(probe) ~= "table" or type(probe.SetAlpha) ~= "function" then return false end
+    local ok = pcall(hooksecurefunc, probe, "SetAlpha", function() end)
+    if not ok then return false end
+    if type(issecurevariable) == "function" then
+        local okS, secure = pcall(issecurevariable, probe, "SetAlpha")
+        hooksSafe = okS and secure == true
+    else
+        hooksSafe = true   -- an older client, where this has always worked
+    end
+    return hooksSafe
+end
+
+-- For the tests: the client is asked again next time.
+function O.ResetHookProbe() hooksSafe = nil end
+
+-- Whether a frame's methods are hooked at all. Off: the probe above answered "safe" on the
+-- WoW Forever client, and the game's cast bar still found no SetStatusBarTexture after the
+-- addon had hooked it. Every piece has its fallback, so nothing is lost but a moment's
+-- promptness. The probe's answer is still recorded by /mint uidump.
+O.OBJECT_HOOKS = false
+
+-- A post-hook on a frame's method, where that is allowed and safe. Returns true when
+-- hooked, false when not (no such method, hooks off, or a client where hooking would break
+-- the method for the game).
+function O.Hook(obj, method, fn)
+    if type(obj) ~= "table" or type(fn) ~= "function" or type(obj[method]) ~= "function" then return false end
+    if not O.OBJECT_HOOKS or not O.ObjectHooksSafe() then return false end
+    return pcall(hooksecurefunc, obj, method, fn) == true
+end
 
 -- frame -> the parent it had before it was hidden, for giving it back
 local taken = setmetatable({}, { __mode = "k" })
@@ -298,13 +348,28 @@ local function paint(mover)
     end
 end
 
+-- Movers that are secure buttons: a click on one of these can run a slash command of the
+-- game's own (the damage meter's box opens the game's Edit Mode on a right-click), and a
+-- command run by a secure button on a click is the game's doing, not the addon's: nothing
+-- the game then does carries the addon's taint. Set by the piece before its mover is made.
+O.SECURE_MOVERS = {}
+
 -- The mover for `key`, made on first use: `width` x `height`, labelled `label` in edit mode,
 -- at `default` ({ point, x, y } from the same point of the screen) until it is moved.
 function O.Mover(key, label, width, height, default)
     local W = ns.W
     local mover = movers[key]
     if not mover then
-        mover = W.safeCreate("Frame", "MintCommunityToolsMover_" .. key, UIParent, W.template())
+        if O.SECURE_MOVERS[key] then
+            local templates = "SecureActionButtonTemplate" .. (W.template() and (", " .. W.template()) or "")
+            mover = W.safeCreate("Button", "MintCommunityToolsMover_" .. key, UIParent, templates)
+            mover.secure = true
+            -- the right button only, on its way up: a command run on the way down as well
+            -- would run twice
+            pcall(mover.RegisterForClicks, mover, "RightButtonUp")
+        else
+            mover = W.safeCreate("Frame", "MintCommunityToolsMover_" .. key, UIParent, W.template())
+        end
         mover.key, mover.label, mover.default = key, label, default
         mover:SetFrameStrata("DIALOG")
         mover:SetFrameLevel(20)
@@ -349,11 +414,29 @@ function O.Mover(key, label, width, height, default)
     mover.label = label
     mover.off = false
     mover.text:SetText(label)
+    -- a secure box is the game's to size, place and show in combat: done when combat ends
+    if rawget(mover, "secure") and inCombat() then
+        mover.pending = { width, height }
+        return mover
+    end
+    mover.pending = nil
     mover:SetSize(width, height)
     place(mover)
     paint(mover)
     mover:Show()
     return mover
+end
+
+-- Combat is over: a secure box that waited is sized, placed and shown now.
+function O.FinishMovers()
+    for _, key in ipairs(order) do
+        local mover = movers[key]
+        local size = mover and rawget(mover, "pending")
+        if size then
+            mover.pending = nil
+            if mover.off then O.HideMover(key) else O.Mover(key, mover.label, size[1], size[2], mover.default) end
+        end
+    end
 end
 
 --- Gives a mover's box something to open on a right-click in edit mode (its piece's settings),
@@ -371,6 +454,10 @@ function O.HideMover(key)
     local mover = movers[key]
     if not mover then return false end
     mover.off = true
+    if rawget(mover, "secure") and inCombat() then
+        mover.pending = rawget(mover, "pending") or { mover:GetWidth(), mover:GetHeight() }
+        return true
+    end
     mover:Hide()
     return true
 end
@@ -428,6 +515,8 @@ function O.SetEdit(on)
     elseif editBar then
         editBar:Hide()
     end
+    -- a piece with something to show only while arranging (sample party members) is told
+    O.TellEdit(on)
     if ns.SettingsUI then ns.SettingsUI.Refresh() end
     return true
 end
@@ -579,9 +668,7 @@ local function hookGameMenu()
     menuHooked = true
     pcall(menu.HookScript, menu, "OnShow", placeMenuThings)
     pcall(menu.HookScript, menu, "OnHide", placeMenuThings)
-    if hooksecurefunc and type(menu.InitButtons) == "function" then
-        pcall(hooksecurefunc, menu, "InitButtons", placeMenuThings)
-    end
+    O.Hook(menu, "InitButtons", placeMenuThings)   -- else the OnShow hook above, after the buttons are made
 end
 
 ---------------------------------------------------------------------------
@@ -687,12 +774,21 @@ end
 
 -- Called when combat ends: a login that happened in combat is set up now, and each piece is
 -- told, for what it could not do during it.
+-- Tells each piece that is set up that edit mode opened or closed.
+function O.TellEdit(on)
+    for _, piece in ipairs(PIECES) do
+        local m = ns[piece.module]
+        if O.applied[piece.key] and m and m.OnEdit then pcall(m.OnEdit, on) end
+    end
+end
+
 function O.OnCombatEnd()
     if O.pendingApply then
         O.pendingApply = nil
         O.Sync()
         if ns.SettingsUI then ns.SettingsUI.Refresh() end
     end
+    O.FinishMovers()
     for _, piece in ipairs(O.PIECES) do
         local m = ns[piece.module]
         if O.applied[piece.key] and m and m.OnCombatEnd then pcall(m.OnCombatEnd) end
