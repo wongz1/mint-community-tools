@@ -514,19 +514,48 @@ local function bagButtons()
     return shown, left
 end
 
+-- The bag window that is open, if one is: the combined one, else the backpack's own. (The
+-- combined window carries a strip of bag slots and the keyring of its own, GamepadBagBar,
+-- but the game gives it no place outside gamepad play: seen in /mint uidump bags on build
+-- 70790, shown and anchored nowhere.)
+local BAG_WINDOWS = { "ContainerFrameCombinedBags", "ContainerFrame1" }
+local BAGS_GAP = 4   -- between the window's top edge and the row above it
+
+local function bagWindow()
+    for _, name in ipairs(BAG_WINDOWS) do
+        local f = frame(name)
+        if f and type(f.IsShown) == "function" then
+            local ok, shown = pcall(f.IsShown, f)
+            if ok and shown == true then return f end
+        end
+    end
+    return nil
+end
+Bars.BagWindow = bagWindow
+
+-- Where the hidden row stands now: above the open bag window, when the settings put it there.
+local function rowWindow(s)
+    return (s.hideBags and s.bagsWithWindow) and bagWindow() or nil
+end
+
 local function layoutBags()
     local s = settings()
     local buttons, left = bagButtons()
     for _, b in ipairs(left) do pcall(b.Hide, b) end
     -- The whole row put away (the default): the bags open with their key, as one window.
+    -- While that window is open the row can stand above it, right-aligned, so the bags and
+    -- the keyring are at hand when the bags are: it comes and goes with the window.
+    local window = rowWindow(s)
     if s.hideBags then
-        for _, b in ipairs(buttons) do pcall(b.Hide, b) end
         ns.Overhaul.HideMover("bags")
-        return
+        if not window then
+            for _, b in ipairs(buttons) do pcall(b.Hide, b) end
+            return
+        end
     end
     if #buttons == 0 then return end
     local size, step = s.size, s.size + s.spacing
-    local mover = ns.Overhaul.Mover("bags", "Bags", #buttons * step - s.spacing, size, { "BOTTOMRIGHT", -20, 36 })
+    local mover = window or ns.Overhaul.Mover("bags", "Bags", #buttons * step - s.spacing, size, { "BOTTOMRIGHT", -20, 36 })
     for i, b in ipairs(buttons) do
         skinButton(b, size)
         local name = b.GetName and b:GetName()
@@ -539,10 +568,27 @@ local function layoutBags()
             pcall(icon.SetPoint, icon, "BOTTOMRIGHT", b, "BOTTOMRIGHT", -1, 1)
         end
         pcall(b.ClearAllPoints, b)
-        pcall(b.SetPoint, b, "TOPLEFT", mover, "TOPLEFT", (i - 1) * step, 0)
+        if window then
+            pcall(b.SetPoint, b, "BOTTOMRIGHT", window, "TOPRIGHT", 0 - (#buttons - i) * step, BAGS_GAP)
+        else
+            pcall(b.SetPoint, b, "TOPLEFT", mover, "TOPLEFT", (i - 1) * step, 0)
+        end
         pcall(b.Show, b)
     end
     if s.extraBags then pcall(dressExtraBags) end
+end
+
+-- A bag window opened or closed: the hidden row comes or goes with it (after combat, when
+-- in it).
+function Bars.OnBagWindow()
+    if not Bars.applied then return end
+    local s = settings()
+    if not (s.hideBags and s.bagsWithWindow) then return end
+    if InCombatLockdown and InCombatLockdown() then
+        Bars.pendingBags = true
+        return
+    end
+    pcall(layoutBags)
 end
 
 ---------------------------------------------------------------------------
@@ -951,6 +997,18 @@ function Bars.Apply()
             if not (InCombatLockdown and InCombatLockdown()) then pcall(layoutBags) end
         end)   -- else the look once a second
     end
+    -- The row above the bag window comes and goes with it.
+    if not Bars.bagWindowHooked then
+        for _, name in ipairs(BAG_WINDOWS) do
+            local f = frame(name)
+            if f and type(f.HookScript) == "function" then
+                Bars.bagWindowHooked = true
+                for _, script in ipairs({ "OnShow", "OnHide" }) do
+                    pcall(f.HookScript, f, script, function() Bars.OnBagWindow() end)
+                end
+            end
+        end
+    end
     -- And a look once a second, for whatever else moves a button.
     if not Bars.watch then
         Bars.watch = CreateFrame("Frame")
@@ -1029,8 +1087,20 @@ function Bars.Check()
             end
         end
     end
-    if settings().hideBags then
-        -- the game shows a bag's button again at times (a bag put on, its row unfolded)
+    local bagsAt = rowWindow(settings()) or (not settings().hideBags and movers.bags) or nil
+    if bagsAt then
+        -- on its box, or above the open bag window: a button pulled off is put back
+        for _, b in ipairs((bagButtons())) do
+            if strayed(b, bagsAt) then
+                pcall(layoutBags)
+                fixed = fixed + 1
+                break
+            end
+        end
+        if settings().extraBags then pcall(dressExtraBags) end
+    elseif settings().hideBags then
+        -- the game shows a bag's button again at times (a bag put on, its row unfolded),
+        -- and the row above the bag window is to go once the window has
         for _, b in ipairs((bagButtons())) do
             local ok, shown = pcall(b.IsShown, b)
             if ok and shown == true then
@@ -1039,15 +1109,6 @@ function Bars.Check()
                 break
             end
         end
-    elseif movers.bags then
-        for _, b in ipairs((bagButtons())) do
-            if strayed(b, movers.bags) then
-                pcall(layoutBags)
-                fixed = fixed + 1
-                break
-            end
-        end
-        if settings().extraBags then pcall(dressExtraBags) end
     end
     if microBar then
         for _, b in ipairs(microButtons()) do
@@ -1125,6 +1186,10 @@ end
 
 -- Combat is over: a bar setting changed during it is applied now.
 function Bars.OnCombatEnd()
+    if Bars.pendingBags then
+        Bars.pendingBags = nil
+        if not Bars.pendingRelayout then pcall(layoutBags) end
+    end
     if not Bars.pendingRelayout then return end
     Bars.pendingRelayout = nil
     Bars.Relayout()
@@ -1152,7 +1217,7 @@ function Bars.OnSettingsChanged(path)
         end
     end
     if path == "bars.hideMicro" then pcall(placeMicro) end
-    if path == "bars.extraBags" or path == "bars.hideBags" then pcall(layoutBags) end
+    if path == "bars.extraBags" or path == "bars.hideBags" or path == "bars.bagsWithWindow" then pcall(layoutBags) end
     if path == "bars.xpClassColor" then refreshExperience() end
     -- the bar is fastened to its mover by two corners: it takes the mover's size
     if (path == "bars.xpWidth" or path == "bars.xpHeight") and xp.frame then

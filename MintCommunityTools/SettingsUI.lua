@@ -270,6 +270,7 @@ function SettingsUI.Build(panel, frame)
     check("bars.enabled", "Flat action bars, each on its own mover; the pet and stance bars, bags and micro menu too")
     check("bars.hideMicro", "Hide the micro menu (Escape and the keybinds still open everything)", 18)
     check("bars.hideBags", "Hide the bag row: the backpack, the bags and the keyring (your bag key still opens them)", 18)
+    check("bars.bagsWithWindow", "While it is hidden, show it above the bag window whenever your bags are open", 36)
     check("bars.extraBags", "The keyring and the reagent bag slot in the bag row, when it is shown", 18)
     -- the buttons' size and the gap between them, then each bar this client has: shown,
     -- how many buttons, how many to a row

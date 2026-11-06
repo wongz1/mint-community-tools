@@ -52,7 +52,7 @@ O.DEFAULTS = {
     enabled = false,
     menuEdit = true,     -- the game menu's Edit Mode button opens this UI's edit mode
     menuButton = true,   -- a Mint Edit Mode button at the bottom of the game menu
-    bars = { enabled = true, size = 32, spacing = 2, hideMicro = false, hideBags = true, extraBags = true, xpClassColor = true, xpWidth = 0, xpHeight = 0,
+    bars = { enabled = true, size = 32, spacing = 2, hideMicro = false, hideBags = true, bagsWithWindow = true, extraBags = true, xpClassColor = true, xpWidth = 0, xpHeight = 0,
              -- each bar: shown at all, how many of its buttons, and how many to a row (a
              -- column, for the two upright bars); fewer to a row stacks the rest under
              bar1 = { shown = true, buttons = 12, perRow = 12 }, bar2 = { shown = true, buttons = 12, perRow = 12 },

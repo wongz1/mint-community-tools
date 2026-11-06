@@ -16,6 +16,13 @@
   on the page were drawn in the dark ink meant for the parchment and were hard to read on
   the flat panel; they are light now, while grey names (spells not yet learned) and red
   level notes keep their colour.
+- **Bags and keyring with the bag window.** The bag row is hidden by default, and this
+  client keeps the bag slots and the keyring nowhere else (the combined bag window has a
+  strip of its own, but only for gamepad play), so with the row hidden there was no way to
+  see your bags or open the keyring. Now, while the row is hidden, it stands above the bag
+  window whenever your bags are open, right-aligned, and goes when they close. A new switch
+  under **Hide the bag row** on the Bars page turns this off. The keyring and the reagent
+  slot are in it when **The keyring and the reagent bag slot in the bag row** is ticked.
 - **Party frames.** The addon's own party frames: four frames in a column, one for each
   party member, clickable like the rest, on one box in Mint edit mode. Built like the player
   frame: a portrait (flat or 3D, as the portrait settings say), the health as a percentage,

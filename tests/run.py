@@ -1831,6 +1831,44 @@ if S.enabled then
       assert(ns.Bars.Check() == 0, "and nothing is put back while it is hidden")
       bag:Show()
       assert(ns.Bars.Check() == 1 and bag._shown == false and ns.Bars.Check() == 0, "a button the game shows again is put away again")
+      -- while the row is hidden it stands above the open bag window, bags and keyring at
+      -- hand, and goes with the window; a switch under the hide switch turns that off
+      do
+        local win = env.ContainerFrameCombinedBags
+        assert(ns.Overhaul.DEFAULTS.bars.bagsWithWindow == true and S.bars.bagsWithWindow == true, "the row above the bag window is on by default")
+        local wasShown = rawget(win, "IsShown")
+        rawset(win, "IsShown", function() return true end)
+        assert(type(win._hooks.OnShow) == "function" and type(win._hooks.OnHide) == "function", "the bag window's show and hide are hooked")
+        win._hooks.OnShow(win)
+        assert(bag._shown and pack._shown and key._shown, "the window open: the row shows, keyring too")
+        assert(bag._point[1] == "BOTTOMRIGHT" and bag._point[2] == win and bag._point[3] == "TOPRIGHT" and bag._point[5] == 4, "above the window's top edge, right-aligned")
+        assert(mover("bags").off == true, "and its own box stays out of edit mode")
+        assert(ns.Bars.Check() == 0, "with nothing out of place")
+        bag:ClearAllPoints()
+        assert(ns.Bars.Check() == 1 and bag._point[2] == win, "a button the game pulls off the window is put back")
+        -- opened in combat: the row waits for combat to end
+        rawset(win, "IsShown", wasShown)
+        win._hooks.OnHide(win)
+        assert(bag._shown == false, "closed again")
+        rawset(win, "IsShown", function() return true end)
+        env.InCombatLockdown = function() return true end
+        win._hooks.OnShow(win)
+        assert(ns.Bars.pendingBags == true and bag._shown == false, "in combat: the row waits")
+        env.InCombatLockdown = function() return false end
+        ns.Bars.OnCombatEnd()
+        assert(ns.Bars.pendingBags == nil and bag._shown and bag._point[2] == win, "combat over: the row stands above the window")
+        rawset(win, "IsShown", wasShown)
+        win._hooks.OnHide(win)
+        assert(bag._shown == false and key._shown == false, "closed: the row goes with it")
+        rawset(win, "IsShown", function() return true end)
+        flip("bars.bagsWithWindow", false)
+        assert(bag._shown == false and ns.Bars.Check() == 0, "switched off: hidden with the window open")
+        flip("bars.bagsWithWindow", true)
+        assert(bag._shown and bag._point[2] == win, "and back on, at once")
+        rawset(win, "IsShown", wasShown)
+        win._hooks.OnHide(win)
+        assert(bag._shown == false, "and gone with the window")
+      end
       flip("bars.hideBags", false)
       assert(bag._shown and pack._shown and key._shown and mover("bags").off == false and bag._point[2] == mover("bags"), "shown again at once, on its box")
       assert(ns.Bars.Check() == 0, "with nothing out of place")
@@ -1853,7 +1891,7 @@ if S.enabled then
       flip(path, was)
       assert(ns.Overhaul.needsReload == false, path .. ": flipped back, no reload is wanted")
     end
-    assert(n == 37, "every switch was flipped: " .. n)
+    assert(n == 38, "every switch was flipped: " .. n)
     assert(tagged == 5 and ns.SettingsUI.RELOAD_TAG == "(turning off needs a reload)", "five switches are marked: " .. tagged)
     assert(sui.checks["bars.enabled"].label:GetText():find("|cff8c8c8c(turning off needs a reload)|r", 1, true), "the mark is dimmed, after the label")
     for _, piece in ipairs(ns.Overhaul.PIECES) do
