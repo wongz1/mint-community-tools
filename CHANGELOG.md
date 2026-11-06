@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.5.9 - unreleased
+## 0.5.9 - 2026-11-06
 
 - **Scan cache.** A new button on the Loot tab (and `/mint cache`) reads every item the
   client has cached — everything it has been told about by anyone linking, selling or
