@@ -524,7 +524,26 @@ do
   BAG.menuArt, BAG.sortArt = art(), art()
   BAG.menu = holding(typed(named("ContainerFrameCombinedBagsPortraitButton"), "Button"), { BAG.menuArt })
   BAG.sort = holding(typed(named("BagItemAutoSortButton"), "Button"), { BAG.sortArt })
-  BAG.children = { BAG.close, BAG.epic, BAG.empty, BAG.money, BAG.search, BAG.menu, BAG.sort }
+  -- six slots of three bags as the game lays them out, three to a row from the bottom right
+  -- off one frame of the window's: bag 2 (slots 1 and 2), then bag 1 (a quiver, below), then
+  -- the backpack
+  BAG.anchor = typed(stub(), "Frame")
+  BAG.slots = {}
+  do
+    local i = 0
+    for _, bag in ipairs({ 2, 1, 0 }) do
+      for slotID = 1, 2 do
+        local b = slot(nil)
+        rawset(b, "GetBagID", function() return bag end)
+        rawset(b, "GetID", function() return slotID end)
+        rawset(b, "IsShown", function() return true end)
+        b:SetPoint("BOTTOMRIGHT", BAG.anchor, "TOPRIGHT", -42 * (i % 3), 4 + 42 * math.floor(i / 3))
+        BAG.slots[#BAG.slots + 1] = b
+        i = i + 1
+      end
+    end
+  end
+  BAG.children = { BAG.close, BAG.epic, BAG.empty, BAG.money, BAG.search, BAG.menu, BAG.sort, unpack(BAG.slots) }
   holding(BAG.frame, {}, BAG.children)
 end
 
@@ -1742,6 +1761,54 @@ if S.enabled then
   TARGET_EXISTS = true
   fire("PLAYER_TARGET_CHANGED")
   ov.target = { tf._shown, tf.name:GetText(), tf.healthText:GetText(), tf.level:GetText(), tf.health._color }
+  -- The level stands first on the health bar at its own size, the name after it; what the
+  -- target is goes on the power bar in coloured words: ELITE here, PVP for a flagged player.
+  do
+    local tags = tf.tags:GetText()
+    local nameLeft = tf.name._pointsBy.LEFT
+    assert(tf.level._point[2] == tf.health and nameLeft[2] == tf.level and nameLeft[3] == "RIGHT" and tf.name._pointsBy.RIGHT[2] == tf.healthText, "level first on the health bar, the name after it")
+    assert(tf.level._font[2] == 14 and tf.name._font[2] == 10, "the level larger than the name")
+    assert(tags:find("ELITE", 1, true) and tags:find("ffd100", 1, true) and not tags:find("PVP", 1, true), "an elite target: ELITE in gold on the power bar: " .. tostring(tags))
+    assert(tf.tags._point[2] == tf.power and tf.tags._point[1] == "LEFT", "where the small level used to be")
+    assert(pf.tags:GetText() == "", "nothing for an ordinary unit")
+    local unitIsPlayer = env.UnitIsPlayer
+    env.UnitIsPlayer = function(u) return u == "target" or u == "player" end
+    env.UnitIsPVP = function(u) return u == "target" end
+    fire("UNIT_FACTION", "target")
+    tags = tf.tags:GetText()
+    assert(tags:find("PVP", 1, true) and tags:find("ff4040", 1, true) and tags:find("ELITE", 1, true), "flagged for PvP: PVP in red, after the rest: " .. tostring(tags))
+    env.UnitIsPVP = function() return false end
+    fire("UNIT_FACTION", "target")
+    assert(not tf.tags:GetText():find("PVP", 1, true), "and gone with the flag")
+    env.UnitIsPlayer, env.UnitIsPVP = unitIsPlayer, nil
+    env.UnitClassification = function(u) return u == "target" and "worldboss" or "normal" end
+    fire("UNIT_LEVEL", "target")
+    assert(tf.tags:GetText():find("BOSS", 1, true), "a boss says so")
+    env.UnitClassification = function(u) return u == "target" and "rare" or "normal" end
+    fire("UNIT_CLASSIFICATION_CHANGED", "target")
+    assert(tf.tags:GetText():find("RARE", 1, true) and tf.tags:GetText():find("c8c8ff", 1, true), "a rare, in silver, as soon as the game says")
+    env.UnitClassification = function(u) return u == "target" and "elite" or "normal" end
+    fire("UNIT_LEVEL", "target")
+    -- in combat and resting: words on the player frame as the events come; a target in
+    -- combat says so too
+    env.UnitAffectingCombat = function(u) return u == "player" end
+    fire("PLAYER_REGEN_DISABLED")
+    assert(pf.tags:GetText():find("COMBAT", 1, true) and pf.tags:GetText():find("ff8000", 1, true) and not tf.tags:GetText():find("COMBAT", 1, true), "in combat: COMBAT in orange on the player frame: " .. tostring(pf.tags:GetText()))
+    env.UnitAffectingCombat = nil
+    env.IsResting = function() return true end
+    fire("PLAYER_REGEN_ENABLED")
+    fire("PLAYER_UPDATE_RESTING")
+    assert(not pf.tags:GetText():find("COMBAT", 1, true) and pf.tags:GetText():find("RESTING", 1, true) and pf.tags:GetText():find("80c8ff", 1, true), "resting: RESTING in blue, COMBAT gone: " .. tostring(pf.tags:GetText()))
+    env.IsResting = nil
+    fire("PLAYER_UPDATE_RESTING")
+    assert(pf.tags:GetText() == "", "up and about: nothing")
+    env.UnitAffectingCombat = function(u) return u == "target" end
+    fire("UNIT_FLAGS", "target")
+    assert(tf.tags:GetText():find("COMBAT", 1, true) and tf.tags:GetText():find("ELITE", 1, true), "a target in combat says so, after what it is")
+    env.UnitAffectingCombat = nil
+    fire("UNIT_FLAGS", "target")
+    assert(not tf.tags:GetText():find("COMBAT", 1, true), "and stops when it leaves combat")
+  end
   ov.targetDebuffs = shownAuras(tf, "debuffs")
   ov.targetBuffs = shownAuras(tf, "buffs")
   ov.tot = { tot._shown, tot.name:GetText(), tot.healthText:GetText() }
@@ -1749,7 +1816,7 @@ if S.enabled then
 
   -- Names are whole: WoW Forever gives a last name where other clients put the realm.
   do
-    assert(pf.name._pointsBy.LEFT[2] == pf.health and pf.name._pointsBy.RIGHT[2] == pf.healthText, "the name has the bar's width up to the numbers")
+    assert(pf.name._pointsBy.LEFT[2] == pf.level and pf.name._pointsBy.RIGHT[2] == pf.healthText, "the name has the bar's width from the level up to the numbers")
     local oldName = env.UnitName
     env.UnitName = function() return "Aldric", "Thornwood" end
     fire("UNIT_NAME_UPDATE", "player")
@@ -1891,7 +1958,7 @@ if S.enabled then
       flip(path, was)
       assert(ns.Overhaul.needsReload == false, path .. ": flipped back, no reload is wanted")
     end
-    assert(n == 38, "every switch was flipped: " .. n)
+    assert(n == 39, "every switch was flipped: " .. n)
     assert(tagged == 5 and ns.SettingsUI.RELOAD_TAG == "(turning off needs a reload)", "five switches are marked: " .. tagged)
     assert(sui.checks["bars.enabled"].label:GetText():find("|cff8c8c8c(turning off needs a reload)|r", 1, true), "the mark is dimmed, after the label")
     for _, piece in ipairs(ns.Overhaul.PIECES) do
@@ -1940,8 +2007,12 @@ if S.enabled then
 
     -- fonts: size, the game's own fonts, LibSharedMedia's when it is there
     step("units.fontSize", 1)
-    assert(S.units.fontSize == 11 and pf.name._font[2] == 11 and pf.healthText._font[2] == 11 and pf.level._font[2] == 11
+    assert(S.units.fontSize == 11 and pf.name._font[2] == 11 and pf.healthText._font[2] == 11 and pf.tags._font[2] == 11
       and pf.powerText._font[2] == 11 and tot.name._font[2] == 11, "every text on every frame takes the size")
+    assert(pf.level._font[2] == 14 and S.units.levelSize == 14, "but the level keeps its own size")
+    step("units.levelSize", 1)
+    assert(S.units.levelSize == 15 and pf.level._font[2] == 15 and tf.level._font[2] == 15 and pf.name._font[2] == 11, "the level size steps alone")
+    step("units.levelSize", -1)
     click("MintCommunityToolsSettingFont")
     assert(S.units.font == "friz" and pf.name._font[1] == "Fonts\\FRIZQT__.TTF" and sui.font:GetText() == "Font: Friz Quadrata", "the font button steps to the next font")
     assert(#ns.Units.Fonts() == 5, "five fonts of the game's own")
@@ -3475,6 +3546,59 @@ if S.enabled then
     BAG.emptyIcon:SetTexture(134414)
     bagsChanged()
     assert(BAG.emptyIcon._alpha == 1 and BAG.emptyIcon._texCoord[1] == 0.08, "an item arrives: its picture shows, trimmed")
+    -- An item that arrives in a slot that was empty, with nothing to tell the addon (the
+    -- window was closed, or the game filled it after the dressing): the look once a second
+    -- while the window is open shows its picture.
+    BAG.emptyIcon:SetAtlas("bags-item-slot-blank")
+    bagsChanged()
+    assert(BAG.emptyIcon._alpha == 0, "empty again: the slot art invisible")
+    BAG.emptyIcon:SetTexture(134414)
+    BAG.SHOWN = true
+    B.events._scripts.OnUpdate(B.events, 1.0)
+    assert(BAG.emptyIcon._alpha == 1 and BAG.emptyIcon._texCoord[1] == 0.08, "a second later its picture shows, trimmed")
+    BAG.SHOWN = false
+    -- Quivers and the like at the bottom: the slots of a special bag are laid out first (the
+    -- first slot is the bottom-right one), the rest after them as the game had them.
+    do
+      local madeContainer = env.C_Container == nil
+      env.C_Container = env.C_Container or {}
+      local oldFree = env.C_Container.GetContainerNumFreeSlots
+      env.C_Container.GetContainerNumFreeSlots = function(bag) return 0, bag == 1 and 1 or 0 end
+      local function at(b) local p = b._points[1]; return { p[4], p[5], p[2], #b._points } end
+      local function same(a, b) return a[1] == b[1] and a[2] == b[2] end
+      local b2s1, b2s2, q1, q2, b0s1, b0s2 = unpack(BAG.slots)
+      local function gameOrder()
+        for i, b in ipairs(BAG.slots) do b:ClearAllPoints(); b:SetPoint("BOTTOMRIGHT", BAG.anchor, "TOPRIGHT", -42 * ((i - 1) % 3), 4 + 42 * math.floor((i - 1) / 3)) end
+      end
+      assert(ns.Overhaul.DEFAULTS.bags.specialBottom == true and same(at(b2s1), { 0, 4 }) and same(at(q1), { -84, 4 }), "on by default; the game put the quiver in the middle")
+      bagsChanged()
+      assert(same(at(q1), { 0, 4 }) and same(at(q2), { -42, 4 }), "the quiver's slots first, at the bottom right")
+      assert(same(at(b2s1), { -84, 4 }) and same(at(b2s2), { 0, 46 }), "then bag 2, wrapping to the next row up")
+      assert(same(at(b0s2), { -84, 46 }) and at(b0s2)[3] == BAG.anchor and at(b0s2)[4] == 1, "the backpack last, hung off the game's own frame by one point")
+      assert(B.Arrange(BAG.frame) == 0 and B.Look() >= 0 and same(at(q1), { 0, 4 }), "nothing moves once it is in order")
+      -- the game lays its slots out again (its own order): the look once a second puts them back
+      gameOrder()
+      BAG.SHOWN = true
+      B.events._scripts.OnUpdate(B.events, 1.0)
+      assert(same(at(q1), { 0, 4 }) and same(at(b2s1), { -84, 4 }), "put back a second after the game moved them")
+      -- in combat the slots are left (protected buttons), and arranged when combat ends
+      gameOrder()
+      env.InCombatLockdown = function() return true end
+      B.events._scripts.OnUpdate(B.events, 1.0)
+      assert(same(at(q1), { -84, 4 }) and B.pendingArrange == true, "in combat: left as the game has them")
+      env.InCombatLockdown = function() return false end
+      B.OnCombatEnd()
+      assert(same(at(q1), { 0, 4 }) and B.pendingArrange == nil, "arranged when combat ends")
+      -- switched off: the game's order back at once; on again: the quiver down again
+      ns.SettingsUI.Set("bags.specialBottom", false)
+      assert(same(at(b2s1), { 0, 4 }) and same(at(q1), { -84, 4 }) and same(at(b0s2), { -84, 46 }), "off: the game's own order back")
+      B.events._scripts.OnUpdate(B.events, 1.0)
+      assert(same(at(q1), { -84, 4 }), "and left alone")
+      ns.SettingsUI.Set("bags.specialBottom", true)
+      assert(same(at(q1), { 0, 4 }), "on: the quiver at the bottom again")
+      BAG.SHOWN = false
+      if madeContainer then env.C_Container = nil else env.C_Container.GetContainerNumFreeSlots = oldFree end
+    end
     BAG.emptyIcon:SetAtlas("bags-item-slot64")
     bagsChanged()
     assert(BAG.emptyIcon._alpha == 0, "it goes: the slot art is invisible again")
@@ -4404,7 +4528,7 @@ def check_overhaul(result, variant):
     assert ov["debuffStacks"] == "", "one stack shows no number"
     assert ov["healthAfterPet"] == 1234 and ov["healthAfterPlayer"] == 999, "only the frame's own unit's events count"
     assert ov["targetHiddenAtFirst"] is True
-    assert ov["target"][0] is True and ov["target"][1] == "Hogger" and ov["target"][2] == "50 / 100" and strip_colors(ov["target"][3]) == "60+"
+    assert ov["target"][0] is True and ov["target"][1] == "Hogger" and ov["target"][2] == "50 / 100" and strip_colors(ov["target"][3]) == "60"
     assert ov["target"][4] == [1, 0, 0], "a hostile's reaction colour"
     assert ov["targetDebuffs"] == [3, True, "BOTTOMLEFT"] and ov["targetBuffs"] == [1, True, "BOTTOMLEFT"]
     assert ov["tot"] == [True, me, "62%"], ov["tot"]

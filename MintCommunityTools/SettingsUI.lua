@@ -302,6 +302,7 @@ function SettingsUI.Build(panel, frame)
     end
     header("Bag, loot and vendor windows")
     check("bags.enabled", "Flat bag, loot and vendor windows: plain slots, with the border in the colour of the item's quality")
+    check("bags.specialBottom", "Quivers, ammo pouches, soul bags and profession bags at the bottom of the combined bag window", 18)
 
     start("chat")
     header("Chat")
@@ -343,6 +344,8 @@ function SettingsUI.Build(panel, frame)
     end)
     sui.font:SetPoint("TOPLEFT", PAD + 2 + 18, y)
     stepper("units.fontSize", "Font size", COL2)
+    y = y - ROW
+    stepper("units.levelSize", "Level size", 18)
     y = y - ROW
     stepper("units.width", "Width", 18)
     stepper("units.height", "Height", COL2)

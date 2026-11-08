@@ -724,7 +724,26 @@ local function flatItemButton(b)
     end
     hide(border)
     follow()
+    d.look = function() picture() follow() end
     return true
+end
+
+-- Looks again at every dressed slot in a window: the picture shown as the slot is filled
+-- now (an item that arrived in a slot that was empty when the window was dressed had its
+-- picture invisible, since the empty-slot art had been hidden and nothing on this client
+-- can be hooked to show the picture when it changes), the border in the item's colour.
+-- Returns how many slots were looked at.
+function Menus.LookAtSlots(f)
+    if type(f) ~= "table" then return 0 end
+    local n = 0
+    for _, child in ipairs(list(f.GetChildren, f)) do
+        local d = dressed[child]
+        if d and d.look then
+            d.look()
+            n = n + 1
+        end
+    end
+    return n
 end
 
 -- A coin box, or any small frame whose frame art is kept in a Border part of three pieces.

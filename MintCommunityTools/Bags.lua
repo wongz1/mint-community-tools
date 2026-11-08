@@ -37,6 +37,7 @@ local Bags = {}
 ns.Bags = Bags
 
 local ipairs, type, pcall = ipairs, type, pcall
+local floor, tsort = math.floor, table.sort
 
 -- The bag windows, by the global names they have had: the combined one, then one per bag.
 local WINDOWS = { "ContainerFrameCombinedBags" }
@@ -69,6 +70,128 @@ local function movable()
         if isShown(f) then return f end
     end
     return nil
+end
+
+---------------------------------------------------------------------------
+-- The slots of the combined window, in the addon's order
+---------------------------------------------------------------------------
+
+-- The game lays the combined window's slots out from the bottom right, the highest-numbered
+-- bag first and the backpack last, so a quiver (or an ammo pouch, a soul bag, a profession
+-- bag) in the middle bag slots lands among the ordinary bags. The addon lays them out again,
+-- the special bags first (so at the bottom), the rest as the game had them. Seen in
+-- /mint uidump bags on build 70790: every slot hangs by its bottom right corner off the same
+-- frame, 42 apart, ten to a row.
+
+-- A bag's family: 0 for an ordinary bag, a number for a quiver, an ammo pouch, a soul bag or
+-- a profession bag. A missing or secret answer counts as ordinary.
+local function bagFamily(bagID)
+    local fn = (type(C_Container) == "table" and C_Container.GetContainerNumFreeSlots) or GetContainerNumFreeSlots
+    if type(fn) ~= "function" then return 0 end
+    local ok, _, family = pcall(fn, bagID)
+    if not ok or (issecretvalue and issecretvalue(family)) or type(family) ~= "number" then return 0 end
+    return family
+end
+
+-- The slots in a bag window: the item buttons the game made, each with its bag and its
+-- first point (the corner it hangs by, off what, and where).
+local function slotsOf(f)
+    local out = {}
+    if type(f) ~= "table" or type(f.GetChildren) ~= "function" then return out end
+    local ok, kids = pcall(function() return { f:GetChildren() } end)
+    for _, c in ipairs(ok and kids or {}) do
+        if type(c) == "table" and type(c.GetBagID) == "function" and type(c.GetID) == "function" and isShown(c) then
+            local okB, bag = pcall(c.GetBagID, c)
+            local okP, point, rel, relPoint, x, y = pcall(c.GetPoint, c, 1)
+            local okN, n = pcall(c.GetNumPoints, c)
+            if okB and okP and type(bag) == "number" and type(x) == "number" and type(y) == "number" and rel ~= nil then
+                out[#out + 1] = { button = c, bag = bag, point = point, rel = rel, relPoint = relPoint, x = x, y = y,
+                                  points = okN and n or 1, special = bagFamily(bag) ~= 0 }
+            end
+        end
+    end
+    return out
+end
+
+-- The grid the game laid the slots out in, read off the slots themselves: all hang by the
+-- same corner off the same frame; the columns are the distinct x offsets, a step the gap
+-- between neighbours, the first slot the rightmost and lowest. Nil when the slots are not
+-- laid out that way (another client), and nothing is moved.
+local function gridOf(list)
+    if #list < 2 then return nil end
+    local first = list[1]
+    local xs, ys = {}, {}
+    for _, s in ipairs(list) do
+        if s.point ~= first.point or s.rel ~= first.rel or s.relPoint ~= first.relPoint then return nil end
+        xs[s.x], ys[s.y] = true, true
+    end
+    local function sorted(set)
+        local t = {}
+        for v in pairs(set) do t[#t + 1] = v end
+        tsort(t)
+        return t
+    end
+    local xl, yl = sorted(xs), sorted(ys)
+    if #xl < 2 then return nil end
+    local stepX = xl[2] - xl[1]
+    for i = 3, #xl do if xl[i] - xl[i - 1] < stepX then stepX = xl[i] - xl[i - 1] end end
+    local stepY = yl[2] and (yl[2] - yl[1]) or stepX
+    for i = 3, #yl do if yl[i] - yl[i - 1] < stepY then stepY = yl[i] - yl[i - 1] end end
+    if stepX <= 0 or stepY <= 0 then return nil end
+    return { point = first.point, rel = first.rel, relPoint = first.relPoint, x0 = xl[#xl], y0 = yl[1], stepX = stepX, stepY = stepY, columns = #xl }
+end
+
+-- Lays the combined window's slots out again: the special bags' slots first, then the rest
+-- in the order they are in now. With `restore`, the game's own order (the special bags
+-- back where they were) for when the setting is turned off. Only out of combat: the slots
+-- are the game's protected buttons, and a window opened in combat is arranged when it
+-- ends. Returns how many slots moved.
+function Bags.Arrange(f, restore)
+    f = f or frame("ContainerFrameCombinedBags")
+    if not Bags.applied or not f or not isShown(f) then return 0 end
+    local specialFirst = ns.Overhaul.Settings().bags.specialBottom ~= false
+    if not specialFirst and not restore then return 0 end
+    if InCombatLockdown and InCombatLockdown() then
+        Bags.pendingArrange = true
+        return 0
+    end
+    local list = slotsOf(f)
+    local g = gridOf(list)
+    if not g then return 0 end
+    -- where each slot is now, counted from the bottom right; the game's own order within a bag
+    for _, s in ipairs(list) do
+        s.at = floor((g.y0 - s.y) / g.stepY + 0.5) * -g.columns + floor((g.x0 - s.x) / g.stepX + 0.5)
+    end
+    tsort(list, function(a, b)
+        if specialFirst and a.special ~= b.special then return a.special end
+        if restore and a.bag ~= b.bag then return a.bag > b.bag end
+        return a.at < b.at
+    end)
+    local moved = 0
+    for i, s in ipairs(list) do
+        local c, r = (i - 1) % g.columns, floor((i - 1) / g.columns)
+        local x, y = g.x0 - c * g.stepX, g.y0 + r * g.stepY
+        if s.x ~= x or s.y ~= y or s.points ~= 1 then
+            pcall(s.button.ClearAllPoints, s.button)
+            pcall(s.button.SetPoint, s.button, g.point, g.rel, g.relPoint, x, y)
+            moved = moved + 1
+        end
+    end
+    Bags.arranged = (Bags.arranged or 0) + moved
+    return moved
+end
+
+-- Once a second while a bag window is open, and a moment after the bags change: the slots'
+-- pictures and borders as the game has them now, and the combined window's slots in the
+-- addon's order. Returns how many slots were looked at or moved.
+function Bags.Look()
+    if not Bags.applied or ns.Menus.IsOff("bags") then return 0 end
+    local n = 0
+    for _, name in ipairs(WINDOWS) do
+        local f = frame(name)
+        if f and isShown(f) then n = n + ns.Menus.LookAtSlots(f) end
+    end
+    return n + Bags.Arrange()
 end
 
 local function mover(width, height)
@@ -223,6 +346,7 @@ function Bags.Refresh()
         end
     end
     dressSort()
+    Bags.Look()
     -- the loot and vendor windows, when one is open (and found now, if it did not exist at login)
     dressLoot()
     for _, name in ipairs(LOOT_WINDOWS) do
@@ -253,6 +377,7 @@ function Bags.Apply()
             if Bags.sinceCheck >= 1 then
                 Bags.sinceCheck = 0
                 Bags.Check()
+                Bags.Look()
             end
             -- The game tells of a change to the bags several times over: once, a moment later.
             if not Bags.dirty then return end
@@ -268,7 +393,10 @@ function Bags.Apply()
         for _, name in ipairs({ "ContainerFrameCombinedBags", "ContainerFrame1" }) do
             local f = frame(name)
             if f and type(f.HookScript) == "function" then
-                pcall(f.HookScript, f, "OnShow", function() Bags.Place() end)
+                pcall(f.HookScript, f, "OnShow", function()
+                    Bags.Place()
+                    if Bags.applied then Bags.dirty = true end   -- its slots a moment after the game has filled them
+                end)
             end
         end
     end
@@ -281,9 +409,19 @@ function Bags.OnEnteringWorld()
     Bags.Place()
 end
 
--- Combat is over: a bag window opened during it goes to its mover now.
+-- Combat is over: a bag window opened during it goes to its mover now, its slots in order.
 function Bags.OnCombatEnd()
     if Bags.pending then Bags.Place() end
+    if Bags.pendingArrange then
+        Bags.pendingArrange = nil
+        Bags.Arrange()
+    end
+end
+
+-- The special bags' place switched: the open window laid out again at once, the game's own
+-- order back when it is off.
+function Bags.OnSettingsChanged(path)
+    if path == "bags.specialBottom" then Bags.Arrange(nil, true) end
 end
 
 -- Switched off: the bag windows get back what was changed on them, and are the game's to

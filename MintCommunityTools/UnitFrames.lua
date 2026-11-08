@@ -79,8 +79,10 @@ local UNIT_EVENTS = {
     "UNIT_HEALTH", "UNIT_MAXHEALTH", "UNIT_HEALTH_FREQUENT", "UNIT_POWER_UPDATE", "UNIT_POWER_FREQUENT", "UNIT_MAXPOWER",
     "UNIT_DISPLAYPOWER", "UNIT_MANA", "UNIT_RAGE", "UNIT_ENERGY", "UNIT_FOCUS", "UNIT_MAXMANA", "UNIT_MAXRAGE",
     "UNIT_MAXENERGY", "UNIT_MAXFOCUS", "UNIT_NAME_UPDATE", "UNIT_LEVEL", "UNIT_FACTION", "UNIT_CONNECTION",
-    "UNIT_PORTRAIT_UPDATE", "UNIT_MODEL_CHANGED", "UNIT_AURA", "UNIT_TARGET", "UNIT_PET",
+    "UNIT_PORTRAIT_UPDATE", "UNIT_MODEL_CHANGED", "UNIT_AURA", "UNIT_TARGET", "UNIT_PET", "UNIT_CLASSIFICATION_CHANGED", "UNIT_FLAGS",
 }
+-- Events of no unit that change what a frame says: the player in or out of combat, resting.
+local STATE_EVENTS = { "PLAYER_REGEN_DISABLED", "PLAYER_REGEN_ENABLED", "PLAYER_UPDATE_RESTING" }
 local POWER_FALLBACK = { MANA = { 0.2, 0.4, 1 }, RAGE = { 0.9, 0.2, 0.2 }, FOCUS = { 1, 0.5, 0.25 }, ENERGY = { 1, 0.85, 0.1 } }
 -- A debuff's border by its type, for clients without the game's own DebuffTypeColor table.
 local DISPEL_COLORS = {
@@ -100,7 +102,7 @@ local FONTS = {
 }
 -- What a setting may be: { least, most, step }. The Settings tab's steppers use these too.
 Units.LIMITS = {
-    fontSize = { 8, 20, 1 }, width = { 120, 400, 10 }, height = { 30, 90, 2 },
+    fontSize = { 8, 20, 1 }, levelSize = { 8, 24, 1 }, width = { 120, 400, 10 }, height = { 30, 90, 2 },
     smallWidth = { 80, 260, 10 }, smallHeight = { 16, 50, 2 },
     partyWidth = { 80, 400, 10 }, partyHeight = { 16, 90, 2 },
     buffSize = { 12, 48, 2 }, debuffSize = { 12, 48, 2 }, perRow = { 4, 16, 1 },
@@ -250,6 +252,8 @@ local function powerColor(unit)
     return f[1], f[2], f[3]
 end
 
+-- The level alone, in the game's difficulty colour; "??" for a level the game does not give
+-- (a boss, a unit too high to read). What else the unit is stands in tagsText.
 local function levelText(unit)
     local level = call(UnitLevel, unit)
     if isSecret(level) then
@@ -257,12 +261,6 @@ local function levelText(unit)
         return ok and text or ""
     end
     local text = (type(level) == "number" and level > 0) and tostring(level) or "??"
-    local class = call(UnitClassification, unit)
-    if isSecret(class) then class = nil end
-    if class == "elite" then text = text .. "+"
-    elseif class == "rareelite" then text = text .. "R+"
-    elseif class == "rare" then text = text .. "R"
-    elseif class == "worldboss" then text = "Boss" end
     local c
     if type(level) == "number" and level > 0 then
         c = call(GetQuestDifficultyColor, level) or call(GetDifficultyColor, level)
@@ -271,6 +269,37 @@ local function levelText(unit)
         return ("|cff%02x%02x%02x%s|r"):format(floor(c.r * 255 + 0.5), floor(c.g * 255 + 0.5), floor(c.b * 255 + 0.5), text)
     end
     return text
+end
+
+-- What stands out about a unit, as short coloured words on the power bar: ELITE, RARE,
+-- RARE ELITE or BOSS from the game's classification (gold for elites and bosses, silver
+-- for rares), PVP in red for a player flagged for PvP, COMBAT in orange for a unit fighting,
+-- and RESTING in blue for the player in an inn or a city. Empty for an ordinary unit at
+-- peace. A secret answer counts as nothing to say.
+local TAG_COLOR = { elite = "ffd100", rareelite = "ffd100", worldboss = "ffd100", rare = "c8c8ff", pvp = "ff4040", combat = "ff8000", resting = "80c8ff" }
+local TAG_TEXT = { elite = "ELITE", rareelite = "RARE ELITE", rare = "RARE", worldboss = "BOSS" }
+Units.TAG_COLOR = TAG_COLOR
+
+local function tagsText(unit)
+    local out = {}
+    local class = call(UnitClassification, unit)
+    if isSecret(class) then class = nil end
+    if TAG_TEXT[class] then out[#out + 1] = "|cff" .. TAG_COLOR[class] .. TAG_TEXT[class] .. "|r" end
+    local player, pvp, ffa = call(UnitIsPlayer, unit), call(UnitIsPVP, unit), call(UnitIsPVPFreeForAll, unit)
+    if not (isSecret(player) or isSecret(pvp) or isSecret(ffa)) and player == true and (pvp == true or ffa == true) then
+        out[#out + 1] = "|cff" .. TAG_COLOR.pvp .. "PVP|r"
+    end
+    local combat = call(UnitAffectingCombat, unit)
+    if not isSecret(combat) and combat == true then out[#out + 1] = "|cff" .. TAG_COLOR.combat .. "COMBAT|r" end
+    if unit == "player" then
+        local resting = call(IsResting)
+        if not isSecret(resting) and resting == true then out[#out + 1] = "|cff" .. TAG_COLOR.resting .. "RESTING|r" end
+    end
+    return table.concat(out, "  ")
+end
+
+local function updateTags(f)
+    if f.tags then pcall(f.tags.SetText, f.tags, tagsText(f.unit)) end
 end
 
 ---------------------------------------------------------------------------
@@ -333,6 +362,7 @@ local function updatePower(f)
         pcall(f.powerText.SetText, f.powerText, text)
     end
     if f.level then pcall(f.level.SetText, f.level, levelText(unit)) end
+    updateTags(f)
 end
 
 -- A unit's whole name. On WoW Forever UnitName gives the first name and, as its second
@@ -609,12 +639,18 @@ local function onEvent(self, event, arg1)
         end
         return
     end
+    if event == "PLAYER_REGEN_DISABLED" or event == "PLAYER_REGEN_ENABLED" or event == "PLAYER_UPDATE_RESTING" then
+        updateTags(self)
+        return
+    end
     if arg1 ~= nil and arg1 ~= self.unit then return end
     if event == "UNIT_AURA" then updateAuras(self)
+    elseif event == "UNIT_FLAGS" then updateTags(self)
     elseif event == "UNIT_PORTRAIT_UPDATE" or event == "UNIT_MODEL_CHANGED" then updatePortrait(self)
     elseif event == "UNIT_NAME_UPDATE" then updateName(self)
     elseif event == "UNIT_HEALTH" or event == "UNIT_MAXHEALTH" or event == "UNIT_HEALTH_FREQUENT" or event == "UNIT_FACTION" or event == "UNIT_CONNECTION" then
         updateHealth(self)
+        if event == "UNIT_FACTION" then updateTags(self) end   -- the PvP flag comes and goes with this
     else
         updatePower(self)
     end
@@ -634,12 +670,14 @@ local function applyFonts(f)
     local font = Units.Font(settings().font)
     local standard = type(STANDARD_TEXT_FONT) == "string" and STANDARD_TEXT_FONT or "Fonts\\FRIZQT__.TTF"
     local path, size = font.path or standard, limited("fontSize")
-    for _, fs in ipairs({ f.name, f.healthText, f.level, f.powerText }) do
+    local function set(fs, at)
         if fs and type(fs.SetFont) == "function" then
-            local ok, set = pcall(fs.SetFont, fs, path, size, "")
-            if (not ok or set == false) and path ~= standard then pcall(fs.SetFont, fs, standard, size, "") end
+            local ok, done = pcall(fs.SetFont, fs, path, at, "")
+            if (not ok or done == false) and path ~= standard then pcall(fs.SetFont, fs, standard, at, "") end
         end
     end
+    for _, fs in ipairs({ f.name, f.healthText, f.powerText, f.tags }) do set(fs, size) end
+    set(f.level, limited("levelSize"))   -- the level at its own, larger size
     f.fontPath, f.fontSize = path, size
 end
 
@@ -782,7 +820,7 @@ local function build(def)
     W.skin(f, W.COLOR.panel)
     -- false, not nil, for what this frame does not have: a frame answers a missing key with
     -- nil, the test harness's stub does not.
-    f.portrait, f.model, f.auras, f.level, f.powerText, f.watched = false, false, false, false, false, false
+    f.portrait, f.model, f.auras, f.level, f.tags, f.powerText, f.watched = false, false, false, false, false, false, false
 
     if def.auras then
         f.portrait = f:CreateTexture(nil, "ARTWORK")
@@ -804,13 +842,24 @@ local function build(def)
     f.healthText = W.fontString(f.health, "GameFontHighlightSmall")
     f.healthText:SetPoint("RIGHT", f.health, "RIGHT", -4, 0)
     f.healthText:SetJustifyH("RIGHT")
+    -- The level stands first on the health bar, larger than the rest (a size of its own), in
+    -- the game's difficulty colour, so it is read at a glance; the name follows it.
+    if def.auras then
+        f.level = W.fontString(f.health, "GameFontHighlightSmall")
+        f.level:SetPoint("LEFT", f.health, "LEFT", 4, 0)
+    end
     f.name = W.fontString(f.health, "GameFontHighlightSmall")
-    f.name:SetPoint("LEFT", f.health, "LEFT", 4, 0)
+    if f.level then
+        f.name:SetPoint("LEFT", f.level, "RIGHT", 4, 0)
+    else
+        f.name:SetPoint("LEFT", f.health, "LEFT", 4, 0)
+    end
     f.name:SetPoint("RIGHT", f.healthText, "LEFT", -4, 0)
     if f.name.SetWordWrap then f.name:SetWordWrap(false) end
     if def.auras then
-        f.level = W.fontString(f.power, "GameFontHighlightSmall", 60)
-        f.level:SetPoint("LEFT", f.power, "LEFT", 4, 0)
+        -- what the unit is (elite, rare, boss, PvP) in short coloured words on the power bar
+        f.tags = W.fontString(f.power, "GameFontHighlightSmall")
+        f.tags:SetPoint("LEFT", f.power, "LEFT", 4, 0)
         f.powerText = W.fontString(f.power, "GameFontHighlightSmall", 80)
         f.powerText:SetPoint("RIGHT", f.power, "RIGHT", -4, 0)
         f.powerText:SetJustifyH("RIGHT")
@@ -840,6 +889,7 @@ local function build(def)
     end)
 
     for _, ev in ipairs(UNIT_EVENTS) do pcall(f.RegisterEvent, f, ev) end
+    for _, ev in ipairs(STATE_EVENTS) do pcall(f.RegisterEvent, f, ev) end
     pcall(f.RegisterEvent, f, "PLAYER_ENTERING_WORLD")
     if def.watch then pcall(f.RegisterEvent, f, "PLAYER_TARGET_CHANGED") end
     if def.group then pcall(f.RegisterEvent, f, "GROUP_ROSTER_UPDATE") end
@@ -984,7 +1034,7 @@ end
 Units.SAMPLES = {
     { name = "Aldric Thornwood", class = "WARRIOR", health = 100, power = "RAGE", powerValue = 35, level = 60 },
     { name = "Bryn Ashvale", class = "PRIEST", health = 72, power = "MANA", powerValue = 80, level = 58 },
-    { name = "Cael Duskmere", class = "ROGUE", health = 45, power = "ENERGY", powerValue = 100, level = 60 },
+    { name = "Cael Duskmere", class = "ROGUE", health = 45, power = "ENERGY", powerValue = 100, level = 60, pvp = true },
     { name = "Dara Flintlock", class = "MAGE", health = 90, power = "MANA", powerValue = 55, level = 57 },
 }
 local SAMPLE_ICON = "Interface\\Icons\\INV_Misc_QuestionMark"
@@ -1009,6 +1059,7 @@ local function showSample(f, sample)
     f.power:SetStatusBarColor(pc[1], pc[2], pc[3])
     if f.powerText then pcall(f.powerText.SetText, f.powerText, "") end
     if f.level then pcall(f.level.SetText, f.level, tostring(sample.level)) end
+    if f.tags then pcall(f.tags.SetText, f.tags, sample.pvp and ("|cff" .. TAG_COLOR.pvp .. "PVP|r") or "") end
     if f.portrait then
         if f.model then f.model:Hide() end
         if settings().portrait then

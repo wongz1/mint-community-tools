@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.5.10 - unreleased
+
+- **The level at a glance, and what the target is.** On the player, target and party frames
+  the level now stands first on the health bar, larger than the rest, in the game's
+  difficulty colour, with the name after it; its size is the new **Level size** stepper on
+  the Units page (8 to 24, 14 to start). The power bar, where the small level used to be,
+  names what the unit is in short coloured words: **ELITE**, **RARE**, **RARE ELITE** or
+  **BOSS** in gold (silver for rares), and **PVP** in red for a player flagged for PvP,
+  which comes and goes as the flag does; **COMBAT** in orange for a unit that is fighting
+  (the player, the target, a party member) and **RESTING** in blue for the player in an inn
+  or a city, as those come and go. Nothing shows for an ordinary unit at peace. The `+` and
+  `R` after the level are gone, replaced by the words.
+- **Quivers at the bottom of the bag.** The combined bag window lays its slots out from the
+  bottom right, the highest-numbered bag first and the backpack last, which puts a quiver
+  (or an ammo pouch, a soul bag or a profession bag) in a middle bag slot among the
+  ordinary bags. The addon now lays the slots out again with the special bags first, so
+  their slots are the bottom rows, and the rest as the game had them; a new switch under
+  the bag windows' on the Bars page turns this off (the game's order comes back at once). A
+  bag opened in combat is arranged when combat ends, since the slots are the game's
+  protected buttons.
+- **Fixed:** items in the bag with no picture, though the slot worked. A slot that was
+  empty when the window was dressed had the game's empty-slot art hidden, and when an item
+  arrived in it later (with the window closed, or after the dressing) nothing showed its
+  picture, since on this client the slot's own methods cannot be hooked. The slots are now
+  looked at once a second while a bag window is open, and a moment after it opens.
+
 ## 0.5.9 - 2026-11-06
 
 - **Scan cache.** A new button on the Loot tab (and `/mint cache`) reads every item the

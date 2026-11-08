@@ -64,7 +64,7 @@ O.DEFAULTS = {
     chat = { enabled = true, background = true, width = 400, height = 180, fontSize = 0, font = "default" },
     units = {
         enabled = true, portrait = true, portrait3d = false, classColor = true,
-        font = "default", fontSize = 10, width = 240, height = 46, smallWidth = 120, smallHeight = 24,
+        font = "default", fontSize = 10, levelSize = 14, width = 240, height = 46, smallWidth = 120, smallHeight = 24,
         buffSize = 20, debuffSize = 20, perRow = 8, buffTimers = true, debuffTimers = true,
         player = { buffs = "off", debuffs = "above", onlyMine = false },
         target = { buffs = "above", debuffs = "above", onlyMine = false },
@@ -75,7 +75,7 @@ O.DEFAULTS = {
     map = { enabled = true, square = true, size = 180, zone = true, coords = true, localTime = true, gameTime = true },
     quests = { enabled = true, levels = true, background = false, collapsed = false, width = 250, maxHeight = 420, tab = "all" },
     menus = { enabled = true },
-    bags = { enabled = true },
+    bags = { enabled = true, specialBottom = true },
     -- width, height and fontSize 0 mean: as the game has them
     cast = { enabled = true, width = 0, height = 0, fontSize = 0, textX = 0, textY = 0 },
     meter = { enabled = true, background = true, backgroundAlpha = 60, oneColor = false, font = "default", fontSize = 0 },
