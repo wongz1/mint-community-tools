@@ -5,13 +5,21 @@
 - **The level at a glance, and what the target is.** On the player, target and party frames
   the level now stands first on the health bar, larger than the rest, in the game's
   difficulty colour, with the name after it; its size is the new **Level size** stepper on
-  the Units page (8 to 24, 14 to start). The power bar, where the small level used to be,
-  names what the unit is in short coloured words: **ELITE**, **RARE**, **RARE ELITE** or
-  **BOSS** in gold (silver for rares), and **PVP** in red for a player flagged for PvP,
-  which comes and goes as the flag does; **COMBAT** in orange for a unit that is fighting
-  (the player, the target, a party member) and **RESTING** in blue for the player in an inn
-  or a city, as those come and go. Nothing shows for an ordinary unit at peace. The `+` and
-  `R` after the level are gone, replaced by the words.
+  the Units page (8 to 24, 14 to start). A row of small flat pills, a coloured block with
+  dark text and a 1px border each, straddles the frame's bottom edge, half on the frame and
+  half hanging off it, for what the unit is: **ELITE**, **RARE ELITE** or **BOSS** in gold
+  with a gold star on each side, **RARE** in silver with silver stars, **PVP** in red for a player flagged for PvP, which comes and goes as the flag
+  does, **COMBAT** in orange for a unit that is fighting (the player, the target, a party
+  member) and **RESTING** in blue for the player in an inn or a city, as those come and go.
+  None for an ordinary unit at peace. The `+` and `R` after the level are gone, replaced by
+  the pills.
+- **A hunter's pet's mood, and no second pet frame.** The pet frame carries a pill for the
+  pet's mood, **HAPPY** in green, **CONTENT** in gold or **UNHAPPY** in red, changing as it
+  is fed (nothing for another class's pet). The new **Pet frame** switch on the Units page
+  turns the addon's pet frame off; the mood pill then sits on the player frame. Fixed: the
+  game's own pet frame came back when a pet was summoned (the game's Edit Mode hands it to
+  the player frame's container, which the addon keeps for class resources), so a hunter had
+  two pet frames. It is put away again as it shows, after combat when that is in combat.
 - **Quivers at the bottom of the bag.** The combined bag window lays its slots out from the
   bottom right, the highest-numbered bag first and the backpack last, which puts a quiver
   (or an ammo pouch, a soul bag or a profession bag) in a middle bag slot among the

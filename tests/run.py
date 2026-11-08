@@ -108,6 +108,9 @@ local function stub(name, template)
       if k == "ClearAllPoints" then rawset(self, "_points", {}); return end
       if k == "GetNumPoints" then return #(rawget(self, "_points") or {}) end
       if k == "SetTexture" then rawset(self, "_texture", (...)); return end
+      if k == "SetAtlas" then rawset(self, "_atlas", (...)); return end
+      if k == "SetVertexColor" then rawset(self, "_vertexColor", { ... }); return end
+      if k == "SetDesaturated" then rawset(self, "_desaturated", (...)); return end
       if k == "SetTextColor" then rawset(self, "_textColor", { ... }); return end
       if k == "GetTextColor" then local c = rawget(self, "_textColor") or { 1, 1, 1, 1 }; return c[1], c[2], c[3], c[4] end
       if k == "SetUnit" then rawset(self, "_unit", (...)); return end
@@ -144,6 +147,7 @@ local function stub(name, template)
       if k == "SetMinMaxValues" then rawset(self, "_minmax", { ... }); return end
       if k == "SetStatusBarColor" then rawset(self, "_color", { ... }); return end
       if k == "SetBackdropBorderColor" then rawset(self, "_borderColor", { ... }); return end
+      if k == "SetBackdropColor" then rawset(self, "_bgColor", { ... }); return end
       if k == "SetParent" then rawset(self, "_parent", (...)); return end
       if k == "SetAllPoints" then rawset(self, "_allPoints", (...)); return end
       if k == "SetAlpha" then rawset(self, "_alpha", (...)); return end
@@ -1762,52 +1766,156 @@ if S.enabled then
   fire("PLAYER_TARGET_CHANGED")
   ov.target = { tf._shown, tf.name:GetText(), tf.healthText:GetText(), tf.level:GetText(), tf.health._color }
   -- The level stands first on the health bar at its own size, the name after it; what the
-  -- target is goes on the power bar in coloured words: ELITE here, PVP for a flagged player.
+  -- target is goes on the power bar as pills: coloured blocks with dark text, ELITE here,
+  -- PVP for a flagged player, COMBAT and RESTING as the state comes and goes.
   do
-    local tags = tf.tags:GetText()
+    local function pillsOf(f)
+      local words = {}
+      for _, p in ipairs(f.pills) do if rawget(p, "_shown") == true then words[#words + 1] = p.text:GetText() end end
+      return table.concat(words, " ")
+    end
+    local function pillOf(f, word)
+      for _, p in ipairs(f.pills) do if rawget(p, "_shown") == true and p.text:GetText() == word then return p end end
+      return nil
+    end
+    local function fill(p) local c = p._bgColor; return c and { c[1], c[2], c[3] } end
     local nameLeft = tf.name._pointsBy.LEFT
     assert(tf.level._point[2] == tf.health and nameLeft[2] == tf.level and nameLeft[3] == "RIGHT" and tf.name._pointsBy.RIGHT[2] == tf.healthText, "level first on the health bar, the name after it")
     assert(tf.level._font[2] == 14 and tf.name._font[2] == 10, "the level larger than the name")
-    assert(tags:find("ELITE", 1, true) and tags:find("ffd100", 1, true) and not tags:find("PVP", 1, true), "an elite target: ELITE in gold on the power bar: " .. tostring(tags))
-    assert(tf.tags._point[2] == tf.power and tf.tags._point[1] == "LEFT", "where the small level used to be")
-    assert(pf.tags:GetText() == "", "nothing for an ordinary unit")
+    assert(pillsOf(tf) == "ELITE", "an elite target: one pill, ELITE: " .. pillsOf(tf))
+    local elite = pillOf(tf, "ELITE")
+    local c = fill(elite)
+    assert(c and c[1] == 1 and c[2] == 0.82 and c[3] == 0 and elite._borderColor[1] < 1, "gold, with a darker border")
+    assert(elite._point[1] == "BOTTOMLEFT" and elite._point[2] == tf.power and elite._point[5] == -7 and elite._size[2] == 12 and elite.text._font[2] == 9 and elite.text:GetText() == "ELITE", "a 12px pill straddling the frame's bottom edge, half below it, its text a touch smaller than the frame's: " .. tostring(elite._point[5]))
+    -- an elite's pill has a gold star on each side, outside the block, and the row starts after the left one
+    assert(elite.starL and elite.starR and elite.starL._shown and elite.starR._shown, "stars on both sides")
+    assert(elite.starL._atlas == "auctionhouse-icon-favorite" and elite.starL._desaturated == true and elite.starL._vertexColor[1] == 1 and elite.starL._vertexColor[2] == 0.82, "the game's star, greyed and tinted gold")
+    assert(elite.starL._point[1] == "RIGHT" and elite.starL._point[2] == elite and elite.starL._point[3] == "LEFT" and elite.starR._point[3] == "RIGHT", "one just left of the pill, one just right")
+    assert(elite.starL._size[1] == 11 and elite._point[4] == 3 + 11 + 2, "a star a touch bigger than the text; the row leaves it room: " .. tostring(elite._point[4]))
+    assert(elite._backdrop and elite.text._point[2] == elite, "a flat block with its word centred")
+    assert(pillsOf(pf) == "", "no pill for an ordinary unit")
     local unitIsPlayer = env.UnitIsPlayer
     env.UnitIsPlayer = function(u) return u == "target" or u == "player" end
     env.UnitIsPVP = function(u) return u == "target" end
     fire("UNIT_FACTION", "target")
-    tags = tf.tags:GetText()
-    assert(tags:find("PVP", 1, true) and tags:find("ff4040", 1, true) and tags:find("ELITE", 1, true), "flagged for PvP: PVP in red, after the rest: " .. tostring(tags))
+    assert(pillsOf(tf) == "ELITE PVP" and fill(pillOf(tf, "PVP"))[1] == 1 and fill(pillOf(tf, "PVP"))[2] == 0.25, "flagged for PvP: a red PVP pill after the first: " .. pillsOf(tf))
+    assert(pillOf(tf, "PVP")._point[2] == pillOf(tf, "ELITE") and pillOf(tf, "PVP")._point[1] == "LEFT" and pillOf(tf, "PVP")._point[3] == "RIGHT" and pillOf(tf, "PVP")._point[4] == 3 + 11 + 2, "in a row, after the elite's right star")
+    assert(pillOf(tf, "PVP").starL == false or pillOf(tf, "PVP").starL._shown == false, "no stars on a PVP pill")
     env.UnitIsPVP = function() return false end
     fire("UNIT_FACTION", "target")
-    assert(not tf.tags:GetText():find("PVP", 1, true), "and gone with the flag")
+    assert(pillsOf(tf) == "ELITE" and #tf.pills == 2, "and gone with the flag; the pill kept for next time")
     env.UnitIsPlayer, env.UnitIsPVP = unitIsPlayer, nil
     env.UnitClassification = function(u) return u == "target" and "worldboss" or "normal" end
     fire("UNIT_LEVEL", "target")
-    assert(tf.tags:GetText():find("BOSS", 1, true), "a boss says so")
+    assert(pillsOf(tf) == "BOSS", "a boss says so")
     env.UnitClassification = function(u) return u == "target" and "rare" or "normal" end
     fire("UNIT_CLASSIFICATION_CHANGED", "target")
-    assert(tf.tags:GetText():find("RARE", 1, true) and tf.tags:GetText():find("c8c8ff", 1, true), "a rare, in silver, as soon as the game says")
+    assert(pillsOf(tf) == "RARE" and fill(pillOf(tf, "RARE"))[3] == 1, "a rare, in silver, as soon as the game says")
+    assert(pillOf(tf, "RARE").starL._shown and pillOf(tf, "RARE").starL._vertexColor[1] == 0.82 and pillOf(tf, "RARE").starL._vertexColor[3] == 0.9, "with silver stars")
     env.UnitClassification = function(u) return u == "target" and "elite" or "normal" end
     fire("UNIT_LEVEL", "target")
-    -- in combat and resting: words on the player frame as the events come; a target in
-    -- combat says so too
+    -- in combat and resting: pills on the player frame as the events come; a target in
+    -- combat gets one too
     env.UnitAffectingCombat = function(u) return u == "player" end
     fire("PLAYER_REGEN_DISABLED")
-    assert(pf.tags:GetText():find("COMBAT", 1, true) and pf.tags:GetText():find("ff8000", 1, true) and not tf.tags:GetText():find("COMBAT", 1, true), "in combat: COMBAT in orange on the player frame: " .. tostring(pf.tags:GetText()))
+    assert(pillsOf(pf) == "COMBAT" and fill(pillOf(pf, "COMBAT"))[2] == 0.5 and pillsOf(tf) == "ELITE", "in combat: an orange COMBAT pill on the player frame")
     env.UnitAffectingCombat = nil
     env.IsResting = function() return true end
     fire("PLAYER_REGEN_ENABLED")
     fire("PLAYER_UPDATE_RESTING")
-    assert(not pf.tags:GetText():find("COMBAT", 1, true) and pf.tags:GetText():find("RESTING", 1, true) and pf.tags:GetText():find("80c8ff", 1, true), "resting: RESTING in blue, COMBAT gone: " .. tostring(pf.tags:GetText()))
+    assert(pillsOf(pf) == "RESTING" and fill(pillOf(pf, "RESTING"))[3] == 1, "resting: a blue RESTING pill, COMBAT gone")
     env.IsResting = nil
     fire("PLAYER_UPDATE_RESTING")
-    assert(pf.tags:GetText() == "", "up and about: nothing")
+    assert(pillsOf(pf) == "", "up and about: none")
     env.UnitAffectingCombat = function(u) return u == "target" end
     fire("UNIT_FLAGS", "target")
-    assert(tf.tags:GetText():find("COMBAT", 1, true) and tf.tags:GetText():find("ELITE", 1, true), "a target in combat says so, after what it is")
+    assert(pillsOf(tf) == "ELITE COMBAT", "a target in combat says so, after what it is")
     env.UnitAffectingCombat = nil
     fire("UNIT_FLAGS", "target")
-    assert(not tf.tags:GetText():find("COMBAT", 1, true), "and stops when it leaves combat")
+    assert(pillsOf(tf) == "ELITE", "and stops when it leaves combat")
+  end
+  -- A hunter's pet: its mood (the game's happiness, 1 to 3) is a pill on the pet frame, HAPPY
+  -- in green, CONTENT in gold, UNHAPPY in red; with the pet frame turned off, on the player
+  -- frame instead. The game's own pet frame, which Edit Mode hands back to the player frame's
+  -- container when a pet comes, is put away again as it shows, after combat when in combat.
+  do
+    local function pillsOf(f)
+      local words = {}
+      for _, p in ipairs(f.pills) do if rawget(p, "_shown") == true then words[#words + 1] = p.text:GetText() end end
+      return table.concat(words, " ")
+    end
+    local function pillOf(f, word)
+      for _, p in ipairs(f.pills) do if rawget(p, "_shown") == true and p.text:GetText() == word then return p end end
+      return nil
+    end
+    local function fill(p) local c = p._bgColor; return c and { c[1], c[2], c[3] } end
+    local petf = frameNamed("MintCommunityToolsPetFrame")
+    assert(type(petf.pills) == "table" and pillsOf(petf) == "", "the pet frame has a pill row, empty for a pet without a mood: " .. pillsOf(petf))
+    env.GetPetHappiness = function() return 3, 125, 0 end
+    fire("UNIT_HAPPINESS", "pet")
+    assert(pillsOf(petf) == "HAPPY" and fill(pillOf(petf, "HAPPY"))[2] == 0.85, "fed: a green HAPPY pill on the pet frame: " .. pillsOf(petf))
+    assert(pillsOf(pf) == "", "and nothing about it on the player frame while the pet frame is on: " .. pillsOf(pf))
+    env.GetPetHappiness = function() return 1, 75, 0 end
+    fire("UNIT_HAPPINESS", "pet")
+    assert(pillsOf(petf) == "UNHAPPY" and fill(pillOf(petf, "UNHAPPY"))[1] == 1 and fill(pillOf(petf, "UNHAPPY"))[2] == 0.25, "hungry: UNHAPPY in red")
+    env.GetPetHappiness = function() return 2, 100, 0 end
+    fire("UNIT_HAPPINESS", "pet")
+    assert(pillsOf(petf) == "CONTENT", "CONTENT between")
+    -- the pet frame off: hidden with its box, the mood moves to the player frame
+    S.units.pet = false
+    ns.Overhaul.Changed("units.pet")
+    assert(petf._shown == false and mover("pet").off == true, "turned off: the pet frame and its box go")
+    assert(pillsOf(pf) == "CONTENT", "the pet's mood goes on the player frame instead: " .. pillsOf(pf))
+    fire("UNIT_PET", "player")
+    assert(petf._shown == false, "and the frame stays away when the pet changes")
+    S.units.pet = true
+    ns.Overhaul.Changed("units.pet")
+    assert(petf._shown == true and mover("pet").off == false and petf._pointsBy.TOPLEFT[2] == mover("pet"), "turned on again: back on its box")
+    assert(pillsOf(pf) == "" and pillsOf(petf) == "CONTENT", "the mood back on the pet frame: " .. pillsOf(pf) .. " / " .. pillsOf(petf))
+    env.GetPetHappiness = nil
+    fire("UNIT_HAPPINESS", "pet")
+    assert(pillsOf(petf) == "", "a client without the call: no pill")
+    -- WoW Forever answers through C_PetInfo instead; whatever shape its answer takes
+    env.C_PetInfo = { GetPetHappiness = function() return 3, 125 end }
+    fire("UNIT_HAPPINESS", "pet")
+    assert(pillsOf(petf) == "HAPPY", "C_PetInfo.GetPetHappiness, a number: " .. pillsOf(petf))
+    env.C_PetInfo = { GetPetHappiness = function() return { happiness = 1 } end }
+    fire("UNIT_HAPPINESS", "pet")
+    assert(pillsOf(petf) == "UNHAPPY", "a table with the number in it: " .. pillsOf(petf))
+    env.C_PetInfo = { GetPetHappiness = function() return "Content" end }
+    fire("UNIT_HAPPINESS", "pet")
+    assert(pillsOf(petf) == "CONTENT", "or the word: " .. pillsOf(petf))
+    env.C_PetInfo = { GetPetHappiness = function() return 2 end }
+    assert(pillsOf(petf) == "CONTENT", "nothing fired yet")
+    env.C_PetInfo = { GetPetHappiness = function() return 3 end }
+    ns.Units.watcher._scripts.OnUpdate(ns.Units.watcher, 1.5)
+    assert(pillsOf(petf) == "HAPPY", "a second later the mood is read again without an event: " .. pillsOf(petf))
+    env.C_PetInfo = nil
+    fire("UNIT_HAPPINESS", "pet")
+    assert(pillsOf(petf) == "", "gone with the call")
+    assert(petf.pills[1]._pointsBy.BOTTOMLEFT[2] == petf.power and petf.pills[1]._size[2] == 12 and petf.pills[1].text._font[2] >= 8, "the small frame's pill straddles its bottom edge too, never under 12px with 8px text")
+    -- the game's pet frame given back to the container by Edit Mode: put away again
+    local game = env.PetFrame
+    assert(type(game._hooks.OnShow) == "function", "the game's pet frame's OnShow is hooked")
+    game._parent = env.UIParent
+    game._hooks.OnShow(game)
+    assert(game._parent == hider, "shown by the game: under the hider again")
+    local inCombatG = env.InCombatLockdown
+    env.InCombatLockdown = function() return true end
+    game._parent = env.UIParent
+    game._hooks.OnShow(game)
+    assert(game._parent == env.UIParent and ns.Units.pendingPet == true, "in combat it waits")
+    env.InCombatLockdown = inCombatG
+    ns.Units.OnCombatEnd()
+    assert(game._parent == hider and ns.Units.pendingPet == nil, "and is put away when combat ends")
+    game._parent = env.UIParent
+    ns.Units.watcher._scripts.OnUpdate(ns.Units.watcher, 1.5)
+    assert(game._parent == hider, "a second later it is looked at anyway")
+    -- `/mint pet` reports what the client says about the pet's mood, without an error
+    env.GetPetHappiness = function() return 3, 125, 0 end
+    env.PET_HAPPINESS3 = "Happy"
+    assert(ns.Units.Report() >= 2, "the report finds the call and the string")
+    env.GetPetHappiness, env.PET_HAPPINESS3 = nil, nil
   end
   ov.targetDebuffs = shownAuras(tf, "debuffs")
   ov.targetBuffs = shownAuras(tf, "buffs")
@@ -1958,7 +2066,7 @@ if S.enabled then
       flip(path, was)
       assert(ns.Overhaul.needsReload == false, path .. ": flipped back, no reload is wanted")
     end
-    assert(n == 39, "every switch was flipped: " .. n)
+    assert(n == 40, "every switch was flipped: " .. n)
     assert(tagged == 5 and ns.SettingsUI.RELOAD_TAG == "(turning off needs a reload)", "five switches are marked: " .. tagged)
     assert(sui.checks["bars.enabled"].label:GetText():find("|cff8c8c8c(turning off needs a reload)|r", 1, true), "the mark is dimmed, after the label")
     for _, piece in ipairs(ns.Overhaul.PIECES) do
@@ -2007,7 +2115,7 @@ if S.enabled then
 
     -- fonts: size, the game's own fonts, LibSharedMedia's when it is there
     step("units.fontSize", 1)
-    assert(S.units.fontSize == 11 and pf.name._font[2] == 11 and pf.healthText._font[2] == 11 and pf.tags._font[2] == 11
+    assert(S.units.fontSize == 11 and pf.name._font[2] == 11 and pf.healthText._font[2] == 11
       and pf.powerText._font[2] == 11 and tot.name._font[2] == 11, "every text on every frame takes the size")
     assert(pf.level._font[2] == 14 and S.units.levelSize == 14, "but the level keeps its own size")
     step("units.levelSize", 1)

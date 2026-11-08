@@ -330,6 +330,8 @@ SlashCmdList["MINTCOMMUNITYTOOLS"] = function(msg)
         ns.Overhaul.Command(arg)
     elseif cmd == "edit" then
         ns.Overhaul.ToggleEdit()
+    elseif cmd == "pet" then
+        if ns.Units and ns.Units.Report then ns.Units.Report() end
     elseif cmd == "uidump" then
         ns.Dump.Run(arg ~= "" and arg or nil, more ~= "" and more or nil)
     elseif cmd == "region" then

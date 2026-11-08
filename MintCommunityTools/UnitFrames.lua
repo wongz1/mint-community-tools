@@ -54,7 +54,8 @@ local UNITS = {
     { key = "player", unit = "player", label = "Player frame", auras = true, default = { "BOTTOM", -200, 220 } },
     { key = "target", unit = "target", label = "Target frame", auras = true, watch = true, default = { "BOTTOM", 200, 220 } },
     { key = "tot", unit = "targettarget", label = "Target of target", watch = true, default = { "BOTTOM", 400, 231 } },
-    { key = "pet", unit = "pet", label = "Pet frame", watch = true, default = { "BOTTOM", -250, 274 } },
+    -- the pet frame carries pills (`pills`) for a hunter's pet's mood, aura rows or no
+    { key = "pet", unit = "pet", label = "Pet frame", watch = true, pills = true, default = { "BOTTOM", -250, 274 } },
     -- the party: four frames in a column, on one box in edit mode (the group's), with a
     -- portrait and aura rows like the player's and the target's, at a size of their own
     -- (`size`), their aura rows set under one key for all four (`cfg`), the health as a
@@ -82,7 +83,7 @@ local UNIT_EVENTS = {
     "UNIT_PORTRAIT_UPDATE", "UNIT_MODEL_CHANGED", "UNIT_AURA", "UNIT_TARGET", "UNIT_PET", "UNIT_CLASSIFICATION_CHANGED", "UNIT_FLAGS",
 }
 -- Events of no unit that change what a frame says: the player in or out of combat, resting.
-local STATE_EVENTS = { "PLAYER_REGEN_DISABLED", "PLAYER_REGEN_ENABLED", "PLAYER_UPDATE_RESTING" }
+local STATE_EVENTS = { "PLAYER_REGEN_DISABLED", "PLAYER_REGEN_ENABLED", "PLAYER_UPDATE_RESTING", "UNIT_HAPPINESS" }
 local POWER_FALLBACK = { MANA = { 0.2, 0.4, 1 }, RAGE = { 0.9, 0.2, 0.2 }, FOCUS = { 1, 0.5, 0.25 }, ENERGY = { 1, 0.85, 0.1 } }
 -- A debuff's border by its type, for clients without the game's own DebuffTypeColor table.
 local DISPEL_COLORS = {
@@ -271,35 +272,242 @@ local function levelText(unit)
     return text
 end
 
--- What stands out about a unit, as short coloured words on the power bar: ELITE, RARE,
--- RARE ELITE or BOSS from the game's classification (gold for elites and bosses, silver
--- for rares), PVP in red for a player flagged for PvP, COMBAT in orange for a unit fighting,
--- and RESTING in blue for the player in an inn or a city. Empty for an ordinary unit at
--- peace. A secret answer counts as nothing to say.
-local TAG_COLOR = { elite = "ffd100", rareelite = "ffd100", worldboss = "ffd100", rare = "c8c8ff", pvp = "ff4040", combat = "ff8000", resting = "80c8ff" }
-local TAG_TEXT = { elite = "ELITE", rareelite = "RARE ELITE", rare = "RARE", worldboss = "BOSS" }
-Units.TAG_COLOR = TAG_COLOR
+-- What stands out about a unit, as small flat pills on the power bar: a coloured block with
+-- dark text and a 1px border, one for each of these, in this order. ELITE, RARE, RARE ELITE
+-- or BOSS from the game's classification (gold for elites and bosses, silver for rares),
+-- PVP in red for a player flagged for PvP, COMBAT in orange for a unit fighting, RESTING in
+-- blue for the player in an inn or a city. None for an ordinary unit at peace. A secret
+-- answer counts as nothing to say.
+-- A tag's word, its colour, and (for what the unit is) the colour of the star on each side
+-- of its pill: gold for an elite or a boss, silver for a rare.
+local GOLD, SILVER = { 1, 0.82, 0 }, { 0.82, 0.82, 0.9 }
+local TAGS = {
+    elite = { "ELITE", 1, 0.82, 0, GOLD }, rareelite = { "RARE ELITE", 1, 0.82, 0, GOLD }, worldboss = { "BOSS", 1, 0.82, 0, GOLD },
+    rare = { "RARE", 0.78, 0.78, 1, SILVER }, pvp = { "PVP", 1, 0.25, 0.25 },
+    combat = { "COMBAT", 1, 0.5, 0 }, resting = { "RESTING", 0.5, 0.78, 1 },
+    -- a hunter's pet's mood, the game's 1 (unhappy) to 3 (happy)
+    happy = { "HAPPY", 0.3, 0.85, 0.3 }, content = { "CONTENT", 1, 0.82, 0 }, unhappy = { "UNHAPPY", 1, 0.25, 0.25 },
+}
+Units.TAGS = TAGS
+local HAPPINESS = { "unhappy", "content", "happy" }
 
-local function tagsText(unit)
+-- The pet frame is on unless the Units page turned it off.
+local function petOn()
+    return settings().pet ~= false
+end
+
+-- A hunter's pet's mood, as the key of its pill: "happy", "content" or "unhappy" from the
+-- game's 3, 2 or 1. Nil without a pet, for another class's pet (the game says nothing of
+-- its mood) and on a client without the call. WoW Forever has the call as
+-- C_PetInfo.GetPetHappiness (the old GetPetHappiness is gone); older clients the other way
+-- round. What it gives back is taken as a number, a table with the number in it, or the
+-- mood's word.
+local function moodOf(v)
+    if isSecret(v) then return nil end
+    if type(v) == "number" then return HAPPINESS[v] end
+    if type(v) == "string" then
+        local w = v:lower()
+        if w:find("unhappy", 1, true) then return "unhappy" end
+        if w:find("content", 1, true) then return "content" end
+        if w:find("happy", 1, true) then return "happy" end
+        return nil
+    end
+    if type(v) == "table" then
+        for _, k in ipairs({ "happiness", "happinessState", "state", "mood", "level", "value" }) do
+            local mood = moodOf(v[k])
+            if mood then return mood end
+        end
+    end
+    return nil
+end
+
+local function happinessCall()
+    if type(C_PetInfo) == "table" and type(C_PetInfo.GetPetHappiness) == "function" then return C_PetInfo.GetPetHappiness end
+    if type(GetPetHappiness) == "function" then return GetPetHappiness end
+    return nil
+end
+
+local function happinessOf()
+    if not exists("pet") then return nil end
+    return moodOf((call(happinessCall())))
+end
+
+-- The game's own pet frame is one the player frame's container manages, and Edit Mode gives
+-- it back to that container, and so to the screen, whenever it applies a layout: a pet
+-- summoned is one such time. Put under the hider again as soon as it shows (its OnShow is
+-- hooked), after combat when it shows in combat (a secure frame), and looked at once a
+-- second besides.
+local function keepPetAway()
+    local O = ns.Overhaul
+    local pet = frame("PetFrame")
+    if not pet then return false end
+    local ok, parent = pcall(pet.GetParent, pet)
+    if ok and parent == O.hider then return false end
+    if InCombatLockdown and InCombatLockdown() then
+        Units.pendingPet = true
+        return false
+    end
+    O.HideBlizzard(pet)
+    return true
+end
+Units.KeepPetAway = keepPetAway
+
+local petHooked = false
+local function watchPet()
+    local pet = frame("PetFrame")
+    if petHooked or not pet or type(pet.HookScript) ~= "function" then return false end
+    petHooked = true
+    pcall(pet.HookScript, pet, "OnShow", keepPetAway)
+    return true
+end
+
+local watcher = CreateFrame("Frame", nil, UIParent)
+watcher.since = 0
+watcher:SetScript("OnUpdate", function(self, elapsed)
+    self.since = self.since + (tonumber(elapsed) or 0)
+    if self.since < 1 then return end
+    self.since = 0
+    if petHooked then keepPetAway() end
+    if Units.RefreshMoods then Units.RefreshMoods() end
+end)
+Units.watcher = watcher
+local PILL_TEXT = { 0.08, 0.08, 0.08, 1 }
+local PILL_GAP, PILL_PAD, STAR_GAP = 3, 4, 2
+local STAR_ATLAS = "auctionhouse-icon-favorite"   -- the game's own golden star; tinted
+
+local function tagsOf(unit)
     local out = {}
     local class = call(UnitClassification, unit)
     if isSecret(class) then class = nil end
-    if TAG_TEXT[class] then out[#out + 1] = "|cff" .. TAG_COLOR[class] .. TAG_TEXT[class] .. "|r" end
+    if TAGS[class] then out[#out + 1] = class end
     local player, pvp, ffa = call(UnitIsPlayer, unit), call(UnitIsPVP, unit), call(UnitIsPVPFreeForAll, unit)
     if not (isSecret(player) or isSecret(pvp) or isSecret(ffa)) and player == true and (pvp == true or ffa == true) then
-        out[#out + 1] = "|cff" .. TAG_COLOR.pvp .. "PVP|r"
+        out[#out + 1] = "pvp"
     end
     local combat = call(UnitAffectingCombat, unit)
-    if not isSecret(combat) and combat == true then out[#out + 1] = "|cff" .. TAG_COLOR.combat .. "COMBAT|r" end
+    if not isSecret(combat) and combat == true then out[#out + 1] = "combat" end
     if unit == "player" then
         local resting = call(IsResting)
-        if not isSecret(resting) and resting == true then out[#out + 1] = "|cff" .. TAG_COLOR.resting .. "RESTING|r" end
+        if not isSecret(resting) and resting == true then out[#out + 1] = "resting" end
     end
-    return table.concat(out, "  ")
+    -- a hunter's pet's mood: on the pet frame, or on the player frame while the pet frame is off
+    if unit == "pet" or (unit == "player" and not petOn()) then
+        local mood = happinessOf()
+        if mood then out[#out + 1] = mood end
+    end
+    return out
+end
+
+-- A pill's height and its text size: as tall as the power bar allows, the text a little
+-- smaller than the frame's; on a short frame the pill overflows the bar a touch rather
+-- than shrink past reading.
+local function pillMetrics(f)
+    local size = f.fontSize or limited("fontSize")
+    local h = (f.powerHeight or 14) - 2
+    if h > size + 6 then h = size + 6 end
+    if h < 12 then h = 12 end
+    local at = size
+    if at > h - 3 then at = h - 3 end
+    if at < 8 then at = 8 end
+    return h, at
+end
+
+-- A star beside a pill: the game's star atlas, drawn grey and tinted, on the frame's dark
+-- ground just outside the pill.
+local function star(p, side)
+    local t = p[side]
+    if t then return t end
+    t = p:CreateTexture(nil, "OVERLAY")
+    if side == "starL" then
+        t:SetPoint("RIGHT", p, "LEFT", -STAR_GAP, 0)
+    else
+        t:SetPoint("LEFT", p, "RIGHT", STAR_GAP, 0)
+    end
+    local ok = pcall(t.SetAtlas, t, STAR_ATLAS, false)
+    if not ok then pcall(t.SetTexture, t, "Interface\\Common\\ReputationStar") end
+    pcall(t.SetDesaturated, t, true)
+    p[side] = t
+    return t
+end
+
+-- The i-th pill of a frame, made when first needed. The row's anchors are set as it is
+-- shown (showPills): where a pill stands depends on the stars its neighbours carry.
+local function pill(f, i)
+    local p = f.pills[i]
+    if p then return p end
+    local W = ns.W
+    p = CreateFrame("Frame", nil, f.power)
+    W.skin(p, W.COLOR.panel)
+    p.text = W.fontString(p, "GameFontHighlightSmall", nil, PILL_TEXT)
+    p.text:SetPoint("CENTER", p, "CENTER", 0, 0)
+    p.text:SetJustifyH("CENTER")
+    p.starL, p.starR = false, false
+    f.pills[i] = p
+    return p
+end
+
+-- How far a pill row hangs below the frame: half a pill, so the row straddles the bottom
+-- edge, half on the frame and half off it.
+local function pillHang(f)
+    local h = pillMetrics(f)
+    return floor(h / 2)
+end
+
+-- Shows one pill for each key, in order, and hides the rest. The row starts at the left of
+-- the power bar and straddles the frame's bottom edge, half a pill below it; a pill with
+-- stars has one on each side, outside the block, and the row leaves room for them.
+local function showPills(f, keys)
+    if not f.pills then return end
+    local W = ns.W
+    local h, at = pillMetrics(f)
+    local starSize = at + 2
+    local standard = type(STANDARD_TEXT_FONT) == "string" and STANDARD_TEXT_FONT or "Fonts\\FRIZQT__.TTF"
+    local before = 0   -- room the previous pill's right star takes
+    for i, key in ipairs(keys) do
+        local t = TAGS[key]
+        local p = pill(f, i)
+        p.key = key
+        pcall(p.text.SetFont, p.text, f.fontPath or standard, at, "")
+        p.text:SetText(t[1])
+        local okW, w = pcall(p.text.GetStringWidth, p.text)
+        if not okW or type(w) ~= "number" or w <= 0 then w = #t[1] * at * 0.62 end
+        p:SetSize(floor(w + PILL_PAD * 2 + 0.5), h)
+        W.setBg(p, { t[2], t[3], t[4], 1 })
+        W.setBorder(p, t[2] * 0.55, t[3] * 0.55, t[4] * 0.55, 1)
+        local stars = t[5]
+        local room = stars and (starSize + STAR_GAP) or 0
+        for _, side in ipairs({ "starL", "starR" }) do
+            if stars then
+                local s = star(p, side)
+                s:SetSize(starSize, starSize)
+                pcall(s.SetVertexColor, s, stars[1], stars[2], stars[3], 1)
+                s:Show()
+            elseif p[side] then
+                p[side]:Hide()
+            end
+        end
+        p:ClearAllPoints()
+        if i == 1 then
+            p:SetPoint("BOTTOMLEFT", f.power, "BOTTOMLEFT", 3 + room, -(pillHang(f) + 1))
+        else
+            p:SetPoint("LEFT", f.pills[i - 1], "RIGHT", PILL_GAP + before + room, 0)
+        end
+        before = room
+        p:Show()
+    end
+    for i = #keys + 1, #f.pills do f.pills[i]:Hide() end
 end
 
 local function updateTags(f)
-    if f.tags then pcall(f.tags.SetText, f.tags, tagsText(f.unit)) end
+    if f.pills then showPills(f, tagsOf(f.unit)) end
+end
+
+-- Once a second: the pet's mood is read again, on whichever frame carries it, in case the
+-- client tells of a change under an event name this addon does not know.
+function Units.RefreshMoods()
+    if frames.pet and rawget(frames.pet, "_shown") ~= false and exists("pet") then
+        if petOn() then updateTags(frames.pet) elseif frames.player then updateTags(frames.player) end
+    end
 end
 
 ---------------------------------------------------------------------------
@@ -578,7 +786,7 @@ local function placeAuras(f)
             local gap = 4 + (used[side] or 0)
             set.frame:ClearAllPoints()
             if side == "above" then set.frame:SetPoint("BOTTOMLEFT", f, "TOPLEFT", 0, gap)
-            elseif side == "below" then set.frame:SetPoint("TOPLEFT", f, "BOTTOMLEFT", 0, -gap)
+            elseif side == "below" then set.frame:SetPoint("TOPLEFT", f, "BOTTOMLEFT", 0, -gap - (f.pills and pillHang(f) or 0))
             elseif side == "left" then set.frame:SetPoint("TOPRIGHT", f, "TOPLEFT", -gap, 0)
             else set.frame:SetPoint("TOPLEFT", f, "TOPRIGHT", gap, 0) end
             used[side] = (used[side] or 0) + ((side == "above" or side == "below") and set.height or set.width) + 4
@@ -608,6 +816,10 @@ local function updateVisibility(f)
         f:Show()
         return
     end
+    if f.unit == "pet" and not petOn() then
+        f:Hide()
+        return
+    end
     if f.watched then return end
     if exists(f.unit) then f:Show() else f:Hide() end
 end
@@ -633,13 +845,18 @@ local function onEvent(self, event, arg1)
         return
     end
     if event == "UNIT_PET" then
-        if self.unit == "pet" and arg1 == "player" then
-            updateVisibility(self)
-            updateAll(self)
+        if arg1 == "player" then
+            if self.unit == "pet" then
+                updateVisibility(self)
+                updateAll(self)
+                keepPetAway()
+            elseif self.unit == "player" then
+                updateTags(self)   -- the pet's mood on this frame, while the pet frame is off
+            end
         end
         return
     end
-    if event == "PLAYER_REGEN_DISABLED" or event == "PLAYER_REGEN_ENABLED" or event == "PLAYER_UPDATE_RESTING" then
+    if event == "PLAYER_REGEN_DISABLED" or event == "PLAYER_REGEN_ENABLED" or event == "PLAYER_UPDATE_RESTING" or event == "UNIT_HAPPINESS" then
         updateTags(self)
         return
     end
@@ -676,7 +893,7 @@ local function applyFonts(f)
             if (not ok or done == false) and path ~= standard then pcall(fs.SetFont, fs, standard, at, "") end
         end
     end
-    for _, fs in ipairs({ f.name, f.healthText, f.powerText, f.tags }) do set(fs, size) end
+    for _, fs in ipairs({ f.name, f.healthText, f.powerText }) do set(fs, size) end
     set(f.level, limited("levelSize"))   -- the level at its own, larger size
     f.fontPath, f.fontSize = path, size
 end
@@ -758,6 +975,37 @@ local function applyParty()
     showGroup("party")
 end
 
+-- The pet frame on or off: following its unit on its box, or hidden with the box put away;
+-- the pet's mood moves to the player frame while it is off. Not in combat (a secure frame):
+-- Units.OnCombatEnd does it afterwards.
+local function applyPet()
+    local f = frames.pet
+    if not f then return false end
+    if InCombatLockdown and InCombatLockdown() then
+        Units.pendingPetFrame = true
+        return false
+    end
+    local O = ns.Overhaul
+    if petOn() then
+        if f.def.watch and not f.watched and type(RegisterUnitWatch) == "function" and pcall(RegisterUnitWatch, f) then
+            f.watched = true
+        end
+        local w, h = dims(f.def)
+        local mover = O.Mover(f.def.key, f.def.label, w, h, f.def.default)
+        f:ClearAllPoints()
+        f:SetPoint("TOPLEFT", mover, "TOPLEFT", 0, 0)
+        updateVisibility(f)
+        updateAll(f)
+    else
+        if f.watched and type(UnregisterUnitWatch) == "function" then pcall(UnregisterUnitWatch, f) end
+        f.watched = false
+        f:Hide()
+        O.HideMover("pet")
+    end
+    if frames.player then updateTags(frames.player) end
+    return true
+end
+
 -- The frame and its mover at the size the settings give. Not in combat: the game does not
 -- let a secure frame be resized then; Units.OnCombatEnd does it afterwards.
 local function resize(f)
@@ -795,6 +1043,7 @@ local function layout(f)
     f.power:SetPoint("TOPLEFT", f.health, "BOTTOMLEFT", 0, -1)
     f.power:SetPoint("TOPRIGHT", f.health, "BOTTOMRIGHT", 0, -1)
     f.power:SetPoint("BOTTOM", f, "BOTTOM", 0, 1)
+    f.powerHeight = inner - healthH - 1
 end
 
 local function bar(parent)
@@ -820,7 +1069,7 @@ local function build(def)
     W.skin(f, W.COLOR.panel)
     -- false, not nil, for what this frame does not have: a frame answers a missing key with
     -- nil, the test harness's stub does not.
-    f.portrait, f.model, f.auras, f.level, f.tags, f.powerText, f.watched = false, false, false, false, false, false, false
+    f.portrait, f.model, f.auras, f.level, f.pills, f.powerText, f.watched = false, false, false, false, false, false, false
 
     if def.auras then
         f.portrait = f:CreateTexture(nil, "ARTWORK")
@@ -856,10 +1105,10 @@ local function build(def)
     end
     f.name:SetPoint("RIGHT", f.healthText, "LEFT", -4, 0)
     if f.name.SetWordWrap then f.name:SetWordWrap(false) end
+    if def.auras or def.pills then
+        f.pills = {}   -- what the unit is (elite, PvP, in combat...), as pills on the power bar, made as needed
+    end
     if def.auras then
-        -- what the unit is (elite, rare, boss, PvP) in short coloured words on the power bar
-        f.tags = W.fontString(f.power, "GameFontHighlightSmall")
-        f.tags:SetPoint("LEFT", f.power, "LEFT", 4, 0)
         f.powerText = W.fontString(f.power, "GameFontHighlightSmall", 80)
         f.powerText:SetPoint("RIGHT", f.power, "RIGHT", -4, 0)
         f.powerText:SetJustifyH("RIGHT")
@@ -990,6 +1239,7 @@ local function hideBlizzard()
     for _, name in ipairs({ "PlayerFrame", "TargetFrame", "TargetFrameToT", "TargetofTargetFrame", "PetFrame" }) do
         O.HideBlizzard(frame(name))
     end
+    watchPet()
     applyParty()
 end
 
@@ -998,6 +1248,7 @@ function Units.Apply()
         if not frames[def.key] then build(def) end
     end
     hideBlizzard()
+    applyPet()
 end
 
 -- Settings changed: everything a frame shows is drawn again at once, whatever the setting
@@ -1016,11 +1267,12 @@ function Units.OnSettingsChanged()
         updatePortrait(f)
         updateAuras(f)
     end
-    -- the party on or off: the game's window is secure, so this too waits for combat to end
+    -- the party and the pet frame on or off: secure frames, so this too waits for combat to end
     if InCombatLockdown and InCombatLockdown() then
         Units.pendingResize = true
     else
         applyParty()
+        applyPet()
     end
 end
 
@@ -1059,7 +1311,7 @@ local function showSample(f, sample)
     f.power:SetStatusBarColor(pc[1], pc[2], pc[3])
     if f.powerText then pcall(f.powerText.SetText, f.powerText, "") end
     if f.level then pcall(f.level.SetText, f.level, tostring(sample.level)) end
-    if f.tags then pcall(f.tags.SetText, f.tags, sample.pvp and ("|cff" .. TAG_COLOR.pvp .. "PVP|r") or "") end
+    showPills(f, sample.pvp and { "pvp" } or {})
     if f.portrait then
         if f.model then f.model:Hide() end
         if settings().portrait then
@@ -1114,6 +1366,14 @@ end
 
 -- Combat is over: a size change, or a preview change, that had to wait is made now.
 function Units.OnCombatEnd()
+    if Units.pendingPet then
+        Units.pendingPet = nil
+        keepPetAway()
+    end
+    if Units.pendingPetFrame then
+        Units.pendingPetFrame = nil
+        applyPet()
+    end
     if Units.pendingGroup then
         Units.pendingGroup = nil
         for key in pairs(groups) do showGroup(key) end
@@ -1126,6 +1386,77 @@ function Units.OnCombatEnd()
     if not Units.pendingResize then return end
     Units.pendingResize = nil
     Units.OnSettingsChanged()
+end
+
+-- `/mint pet`: what this client says about the pet's mood, for finding the call on a client
+-- that does not answer GetPetHappiness. Printed to the chat.
+function Units.Report()
+    local db = ns.DB()
+    db.petReport = {}
+    local function say(text)
+        db.petReport[#db.petReport + 1] = text
+        if ns.Say then ns.Say(text) else print(text) end
+    end
+    local function s(v)
+        if isSecret(v) then return "secret" end
+        local ok, r = pcall(tostring, v)
+        return ok and r or "?"
+    end
+    local hasUI, hunter = call(HasPetUI)
+    say(sformat("pet: exists %s, HasPetUI %s %s, name %s", s(exists("pet")), s(hasUI), s(hunter), s(call(UnitName, "pet"))))
+    local a, b, c = call(GetPetHappiness)
+    say(sformat("GetPetHappiness: %s -> %s, %s, %s", type(GetPetHappiness), s(a), s(b), s(c)))
+    local cfn = type(C_PetInfo) == "table" and C_PetInfo.GetPetHappiness or nil
+    local r1, r2, r3, r4 = call(cfn)
+    say(sformat("C_PetInfo.GetPetHappiness: %s -> %s %s, %s, %s, %s; read as %s", type(cfn), type(r1), s(r1), s(r2), s(r3), s(r4), s(moodOf(r1))))
+    if type(r1) == "table" then
+        for k, v in pairs(r1) do say(sformat("    .%s = %s %s", s(k), type(v), s(v))) end
+    end
+    say(sformat("UnitPower(pet, 27 happiness) %s / %s", s(call(UnitPower, "pet", 27)), s(call(UnitPowerMax, "pet", 27))))
+    local ind = frame("PetFrameHappiness")
+    if ind then
+        local tex = ind.texture or ind.Texture or frame("PetFrameHappinessTexture")
+        say(sformat("PetFrameHappiness: shown %s, texture %s atlas %s coords %s,%s", s(call(ind.IsShown, ind)),
+            tex and s(call(tex.GetTexture, tex)) or "-", tex and type(tex.GetAtlas) == "function" and s(call(tex.GetAtlas, tex)) or "-",
+            tex and s((call(tex.GetTexCoord, tex))) or "-", tex and s((select(3, call(tex.GetTexCoord, tex)))) or "-"))
+    end
+    local enum = type(Enum) == "table" and type(Enum.PowerType) == "table" and Enum.PowerType.Happiness or nil
+    local pt, ptName = call(UnitPowerType, "pet")
+    say(sformat("Enum.PowerType.Happiness %s; UnitPowerType(pet) %s %s; UnitPower(pet, 4) %s / %s",
+        s(enum), s(pt), s(ptName), s(call(UnitPower, "pet", 4)), s(call(UnitPowerMax, "pet", 4))))
+    local found = 0
+    for k, v in pairs(_G) do
+        if type(k) == "string" then
+            if k:lower():find("happ", 1, true) then
+                found = found + 1
+                say(sformat("  %s = %s%s", k, type(v), type(v) == "string" and (" " .. v) or ""))
+            end
+            if k:sub(1, 2) == "C_" and type(v) == "table" then
+                for k2, v2 in pairs(v) do
+                    if type(k2) == "string" and k2:lower():find("happ", 1, true) then
+                        found = found + 1
+                        say(sformat("  %s.%s = %s", k, k2, type(v2)))
+                    end
+                end
+            end
+        end
+    end
+    say(sformat("%d global names with 'happ' in them; the report is saved with the addon's data on the next /reload", found))
+    local info = frame("PetPaperDollPetHappinessInfo")
+    if info and type(info.GetRegions) == "function" then
+        local ok, regions = pcall(function() return { info:GetRegions() } end)
+        for _, r in ipairs(ok and regions or {}) do
+            if type(r) == "table" and type(r.GetTexture) == "function" then
+                local tex = call(r.GetTexture, r)
+                local atlas = type(r.GetAtlas) == "function" and call(r.GetAtlas, r) or nil
+                local l, _, t = call(r.GetTexCoord, r)
+                say(sformat("  pet tab happiness texture: %s atlas %s coords %s,%s shown %s", s(tex), s(atlas), s(l), s(t), s(call(r.IsShown, r))))
+            end
+        end
+    else
+        say("no PetPaperDollPetHappinessInfo frame")
+    end
+    return found
 end
 
 -- The next side after `side`, for the Settings tab's cycle buttons.

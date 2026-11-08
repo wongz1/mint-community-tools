@@ -63,7 +63,7 @@ O.DEFAULTS = {
     -- fontSize 0 and font "default" mean: as the game has them
     chat = { enabled = true, background = true, width = 400, height = 180, fontSize = 0, font = "default" },
     units = {
-        enabled = true, portrait = true, portrait3d = false, classColor = true,
+        enabled = true, pet = true, portrait = true, portrait3d = false, classColor = true,
         font = "default", fontSize = 10, levelSize = 14, width = 240, height = 46, smallWidth = 120, smallHeight = 24,
         buffSize = 20, debuffSize = 20, perRow = 8, buffTimers = true, debuffTimers = true,
         player = { buffs = "off", debuffs = "above", onlyMine = false },
